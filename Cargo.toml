@@ -1,0 +1,21 @@
+[package]
+name = "rust-scheduler"
+version = "0.1.0"
+authors = ["Yves MOISAN <yves.moisan@openocean.fr>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+diesel = { version = "1.4.4", features = ["sqlite"] }
+rocket = "0.4.7"
+dotenv = "0.15.0"
+chrono = { version = "0.4", features = ["serde"] }
+
+[global.databases]
+task_db = { url = "./database.sqlite" }
+
+[dependencies.rocket_contrib]
+version = "0.4.7"
+default-features = false
+features = ["diesel_sqlite_pool"]
