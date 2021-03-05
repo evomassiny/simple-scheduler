@@ -3,8 +3,11 @@
 #[macro_use] extern crate rocket_contrib;
 #[macro_use] extern crate diesel;
 extern crate chrono;
+extern crate tempfile;
+extern crate nix;
 pub mod schema;
 pub mod models;
+pub mod executor;
 
 #[database("tasks_db")]
 struct TaskDbConn(rocket_contrib::databases::diesel::SqliteConnection);
@@ -17,8 +20,10 @@ fn index() -> &'static str {
 
 
 fn main() {
+    let e = models::Process::spawn("sleep 60 && echo yes");
+    dbg!(e);
     rocket::ignite()
-        .attach(TaskDbConn::fairing())
+        //.attach(TaskDbConn::fairing())
         .mount("/", routes![index])
         .launch();
 }

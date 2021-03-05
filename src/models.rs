@@ -8,7 +8,7 @@ pub struct Job {
     pub status: u8,
 }
 
-#[derive(Queryable)]
+#[derive(Queryable,Debug)]
 pub struct Process {
     pub id: i32,
     pub pid: i32,

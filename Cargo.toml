@@ -10,6 +10,8 @@ edition = "2018"
 diesel = { version = "1.4.4", features = ["sqlite"] }
 rocket = "0.4.7"
 dotenv = "0.15.0"
+tempfile = "3"
+nix = "0.20"
 chrono = { version = "0.4", features = ["serde"] }
 
 [global.databases]
