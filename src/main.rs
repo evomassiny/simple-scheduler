@@ -21,7 +21,7 @@ fn index() -> &'static str {
 
 fn main() {
     let e = models::Process::spawn("sleep 60 && echo yes");
-    dbg!(e);
+    dbg!(&e);
     rocket::ignite()
         //.attach(TaskDbConn::fairing())
         .mount("/", routes![index])
