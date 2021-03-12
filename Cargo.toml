@@ -1,14 +1,16 @@
 [package]
 name = "rust-scheduler"
 version = "0.1.0"
-authors = ["Yves MOISAN <yves.moisan@openocean.fr>"]
+authors = ["Yves MOISAN <yves@moisan.tf"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-diesel = { version = "1.4.4", features = ["sqlite"] }
-rocket = "0.4.7"
+rocket = {git = "https://github.com/SergioBenitez/Rocket", branch = "master"}
+# tokio + rustls
+sqlx = { version = "0.5", features = [ "runtime-tokio-rustls", "chrono", "sqlite", "migrate", "macros" ] }
+#deadpool = { version = "0.7", default-features = false, features = ["managed"] }
+async-trait = "0.1.48"
+
 dotenv = "0.15.0"
 tempfile = "3"
 nix = "0.20"
@@ -18,6 +20,8 @@ chrono = { version = "0.4", features = ["serde"] }
 task_db = { url = "./database.sqlite" }
 
 [dependencies.rocket_contrib]
-version = "0.4.7"
-default-features = false
-features = ["diesel_sqlite_pool"]
+git = "https://github.com/SergioBenitez/Rocket"
+branch = "master"
+#default-features = false
+#features = ["diesel_sqlite_pool"]
+

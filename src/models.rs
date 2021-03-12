@@ -1,6 +1,6 @@
 use chrono::NaiveDateTime;
 
-#[derive(Queryable)]
+#[derive(Debug)]
 pub struct Job {
     pub id: i32,
     pub name: String,
@@ -8,7 +8,7 @@ pub struct Job {
     pub status: u8,
 }
 
-#[derive(Queryable,Debug)]
+#[derive(Debug)]
 pub struct Process {
     pub id: i32,
     pub pid: i32,
@@ -16,7 +16,7 @@ pub struct Process {
     pub stderr: String,
 }
 
-#[derive(Queryable)]
+#[derive(Debug)]
 pub struct Task {
     pub id: i32,
     pub name: String,
@@ -26,7 +26,7 @@ pub struct Task {
     pub job: i32,
 }
 
-#[derive(Queryable)]
+#[derive(Debug)]
 pub struct TaskDependency {
     pub id: i32,
     pub child: i32,
