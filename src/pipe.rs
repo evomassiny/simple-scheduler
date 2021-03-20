@@ -30,6 +30,14 @@ impl Pipe {
         self.write_end = None;
     }
 
+    /// Compare fd to self.
+    pub fn is_write_fd(&self, external_fd: RawFd) -> bool {
+        match self.write_end {
+            Some(fd) => fd == external_fd,
+            None => false
+        }
+    }
+
     /// Close reader end of the pipe
     pub fn close_reader(&mut self) {
         if let Some(raw_fd) = self.read_end {
