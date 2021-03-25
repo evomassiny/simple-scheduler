@@ -1,5 +1,4 @@
-use nix::libc::close;
-use nix::unistd::{pipe, read, write};
+use nix::unistd::{pipe, read, write, close};
 use std::os::unix::io::RawFd;
 
 /// An Unix unamed pipe.
@@ -21,13 +20,12 @@ impl Pipe {
     }
 
     /// Close writer end of the pipe
-    pub fn close_writer(&mut self) {
+    pub fn close_writer(&mut self) -> Result<(), String> {
         if let Some(raw_fd) = self.write_end {
-            unsafe {
-                close(raw_fd);
-            }
+            close(raw_fd).map_err(|_| "Could not close reader end")?;
         }
         self.write_end = None;
+        Ok(())
     }
 
     /// Compare fd to self.
@@ -39,19 +37,18 @@ impl Pipe {
     }
 
     /// Close reader end of the pipe
-    pub fn close_reader(&mut self) {
+    pub fn close_reader(&mut self) -> Result<(), String> {
         if let Some(raw_fd) = self.read_end {
-            unsafe {
-                close(raw_fd);
-            }
+            close(raw_fd).map_err(|_| "Could not close reader end")?;
         }
         self.read_end = None;
+        Ok(())
     }
 
     /// Close pipe
-    pub fn close(&mut self) {
-        self.close_writer();
-        self.close_reader();
+    pub fn close(&mut self) -> Result<(), String> {
+        self.close_writer()?;
+        self.close_reader()
     }
 
     /// send an integer to the pipe
@@ -85,6 +82,6 @@ impl Pipe {
 
 impl Drop for Pipe {
     fn drop(&mut self) {
-        self.close();
+        let _ = self.close();
     }
 }

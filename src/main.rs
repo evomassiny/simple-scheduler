@@ -12,7 +12,7 @@ pub mod executor;
 pub mod pipe;
 pub mod process_utils;
 
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqlitePoolOptions,SqlitePool};
 use rocket::State;
 use dotenv::dotenv;
 
@@ -23,7 +23,7 @@ async fn index() -> &'static str {
 }
 
 #[get("/spawn")]
-async fn spawn() -> String {
+async fn spawn(pool: State<'_, SqlitePool>) -> String {
     if let Ok(process) = models::Process::spawn_daemon("sleep 60 && echo yes", 1).await {
         return format!("Spawned PID: {}", process.pid);
     }
