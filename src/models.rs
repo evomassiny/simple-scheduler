@@ -12,8 +12,6 @@ pub struct Job {
 pub struct Process {
     pub id: i32,
     pub pid: i32,
-    pub stdout: String,
-    pub stderr: String,
 }
 
 #[derive(Debug)]
@@ -32,3 +30,4 @@ pub struct TaskDependency {
     pub child: i32,
     pub parent: i32,
 }
+

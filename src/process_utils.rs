@@ -1,7 +1,18 @@
-use nix::libc::{
-    c_char, c_int, c_ulong, c_void, memset, prctl, strlen, strncpy, PR_SET_NAME, PT_NULL,
+use nix::{
+    libc::{ c_char, c_int, c_ulong, c_void, memset, prctl, strlen, strncpy, PR_SET_NAME, PT_NULL, STDERR_FILENO, STDOUT_FILENO},
+    unistd::{close, dup2, },
+    sys::{
+        signal::{signal, SigHandler, Signal, sigprocmask, SigSet, SigmaskHow},
+    },
 };
-use std::ffi::CString;
+use std::{
+    fs::{self, File},
+    os::unix::io::{RawFd, IntoRawFd},
+    env,
+    ffi::CString,
+    path::{Path, PathBuf},
+};
+use crate::pipe::Pipe;
 
 /** 
  * This file is dedicated to the implementation of `rename_current_process()`.
@@ -65,11 +76,136 @@ pub fn rename_current_process(name: &str) -> Result<(), ()> {
             PT_NULL,
         );
         // 2 - overwrite ARGV[0]
-        // first get the old process name to retreive its length
-        let old_len = strlen(*ARGV as *mut c_char);
-        let new_len = std::cmp::min(old_len, new_name.len());
-        memset(*ARGV as *mut c_void, '\0' as i32, old_len); // clear original string
-        strncpy(*ARGV as *mut c_char, name_as_c_string.as_ptr(), new_len); // override with new content
+        if ARGV != (PT_NULL as *const *const u8) {
+            // first get the old process name to retreive its length
+            let old_len = strlen(*ARGV as *mut c_char);
+            let new_len = std::cmp::min(old_len, new_name.len());
+            memset(*ARGV as *mut c_void, '\0' as i32, old_len); // clear original string
+            strncpy(*ARGV as *mut c_char, name_as_c_string.as_ptr(), new_len); // override with new content
+        }
     }
     Ok(())
+}
+
+/// reset signal handlers:
+/// * unblock all signal mask
+/// * reset all signal handler to default
+pub fn reset_signal_handlers() -> Result<(), String> {
+    // clear signal mask
+    sigprocmask(SigmaskHow::SIG_UNBLOCK, Some(&SigSet::all()), None)
+        .map_err(|_| "Failed to clean signal mask".to_string())?;
+    // reset all sigaction to default
+    for sig in Signal::iterator() {
+        // SIGKILL and SIGSTOP cannot be altered on unix
+        if sig == Signal::SIGKILL || sig == Signal::SIGSTOP {
+            continue;
+        }
+        unsafe { 
+            signal(sig, SigHandler::SigDfl)
+                .map_err(|_| format!("Could not reset signal '{}' to default", sig.as_str()))?;
+        }
+    }
+    Ok(())
+}
+
+/// use `dup2()` to open a file and assign it to a given File descriptor
+/// (even if it already exists)
+pub fn assign_file_to_fd(file_path: &Path, fd: RawFd) -> Result<(), String> {
+    let file = File::create(file_path)
+        .map_err(|_| format!("could not open '{}'", file_path.display()))?;
+    let _ = dup2(file.into_raw_fd(), fd)
+        .map_err(|_| "Failed to redirect stderr".to_string())?;
+    Ok(())
+}
+
+/// Close all files openned by the caller process but stdin/stdout and the pipe:
+/// NOTE: it iters `/proc/self/fd` and call `close()` on everything (but stdin / stdout)
+pub fn close_everything_but_stderr_stdout_and_pipe(pipe: &Pipe) -> Result<(), String> {
+    let mut descriptors_to_close: Vec<i32> = Vec::new();
+    // first collect all descriptors,
+    {
+        let fd_entries = std::fs::read_dir("/proc/self/fd").expect("could not read /proc/self/fd");
+        for entry in fd_entries {
+            let file_name: String = entry
+                .map_err(|_| "entry error".to_string())?
+                .file_name()
+                .to_string_lossy()
+                .to_string();
+            let fd: i32 = file_name.parse().map_err(|_| "parse error".to_string())?;
+            if fd != STDOUT_FILENO && fd != STDERR_FILENO && !pipe.is_fd(fd) {
+                descriptors_to_close.push(fd);
+            }
+        }
+    }
+    // then close them in a second step,
+    // (to avoid closing the /proc/self/fd as we're crawling it.)
+    for fd in descriptors_to_close {
+        let _ = close(fd); // ignore failure
+    }
+    Ok(())
+}
+
+
+/// Name of the environment var that holds a path to the process directory
+pub const PROCESS_DIR_ENV_NAME: &'static str = "PROCESS_DIR";
+/// Prefix of the process directory
+pub const PROCESS_OUTPUT_DIR_PREFIX: &'static str = "process-output-";
+/// stdout file name
+pub const PROCESS_STDOUT_FILE_NAME: &'static str = "stdout";
+/// stderr file name
+pub const PROCESS_STDERR_FILE_NAME: &'static str = "stderr";
+/// status file name
+pub const PROCESS_STATUS_FILE_NAME: &'static str = "status";
+/// named pipe scheduler -> monitor
+pub const TO_MONITOR_PIPE: &'static str = "to_monitor.sock";
+/// named pipe monitor -> scheduler
+pub const FROM_MONITOR_PIPE: &'static str = "from_monitor.sock";
+/// CWD directory name
+pub const PROCESS_CWD_DIR_NAME: &'static str = "cwd";
+
+
+/// holds path related to a monitor process
+#[derive(Debug)]
+pub struct MonitorHandle {
+    pub stdout: PathBuf,
+    pub stderr: PathBuf,
+    pub status: PathBuf,
+    pub cwd: PathBuf,
+    pub to_monitor: PathBuf,
+    pub from_monitor: PathBuf,
+}
+
+impl MonitorHandle {
+    pub fn from_task_id(task_id: i32) -> Result<Self, Box<dyn std::error::Error>> {
+        // create temporary file for stdout
+        // fetch $PROCESS_DIR_ENV variable
+        let processes_dir: String = env::var(PROCESS_DIR_ENV_NAME)
+            .unwrap_or_else(|_| env::temp_dir().to_string_lossy().to_string());
+
+        // create process directory
+        let output_dir = Path::new(&processes_dir).join(&format!("{}{}", PROCESS_OUTPUT_DIR_PREFIX, task_id));
+        fs::create_dir_all(&output_dir)?;
+
+        // create process CWD directory, the process will live inside
+        let cwd = output_dir.join(&PROCESS_CWD_DIR_NAME);
+        fs::create_dir_all(&cwd)?;
+
+        // create process stdout/stderr file name
+        let stdout_path = output_dir.join(&PROCESS_STDOUT_FILE_NAME);
+        let stderr_path = output_dir.join(&PROCESS_STDERR_FILE_NAME);
+        let status_path = output_dir.join(&PROCESS_STATUS_FILE_NAME);
+        let to_monitor = output_dir.join(&TO_MONITOR_PIPE);
+        let from_monitor = output_dir.join(&FROM_MONITOR_PIPE);
+        Ok(
+            Self {
+                stdout: stdout_path,
+                stderr: stderr_path,
+                status: status_path,
+                cwd: cwd,
+                to_monitor: to_monitor,
+                from_monitor: from_monitor,
+
+            }
+        )
+    }
 }
