@@ -24,7 +24,7 @@ async fn index() -> &'static str {
 
 #[get("/spawn")]
 async fn spawn(pool: State<'_, SqlitePool>) -> String {
-    if let Ok(process) = models::Process::spawn_daemon("sleep 60 && echo yes", 1).await {
+    if let Ok(process) = models::Process::spawn_daemon("sleep 60 && echo $(date)", 1).await {
         return format!("Spawned PID: {}", process.pid);
     }
     format!("Failed")

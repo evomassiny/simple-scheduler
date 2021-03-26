@@ -145,6 +145,16 @@ pub fn close_everything_but_stderr_stdout_and_pipe(pipe: &Pipe) -> Result<(), St
     Ok(())
 }
 
+/// mask SIGCHLD signals so they are stored in a queue by the kernel.
+/// This should be done BEFORE forking, 
+/// this way the parent won't miss any signals in-between the fork() 
+/// and the reading of a SIGCHLD non-blocking Rawfd.
+pub fn block_sigchild() -> Result<(), String> {
+    let mut mask = SigSet::empty();
+    mask.add(Signal::SIGCHLD);
+    mask.thread_block().map_err(|_| "Could not mask SIGCHLD".to_string())?;
+    Ok(())
+}
 
 /// Name of the environment var that holds a path to the process directory
 pub const PROCESS_DIR_ENV_NAME: &'static str = "PROCESS_DIR";
