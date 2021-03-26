@@ -29,6 +29,18 @@ impl Pipe {
     }
 
     /// Compare fd to self.
+    pub fn is_fd(&self, external_fd: RawFd) -> bool {
+        self.is_read_fd(external_fd) || self.is_write_fd(external_fd)
+    }
+    
+    /// Compare fd to self.
+    pub fn is_read_fd(&self, external_fd: RawFd) -> bool {
+        match self.read_end {
+            Some(fd) => fd == external_fd,
+            None => false
+        }
+    }
+    /// Compare fd to self.
     pub fn is_write_fd(&self, external_fd: RawFd) -> bool {
         match self.write_end {
             Some(fd) => fd == external_fd,

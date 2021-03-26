@@ -6,7 +6,7 @@ use nix::{
     unistd::{close, chdir, dup2, execv, fork, getpid, setsid, ForkResult},
     sys::{
         wait::waitpid,
-        signal::{sigprocmask, SigSet, SigmaskHow},
+        signal::{signal, SigHandler, Signal, sigprocmask, SigSet, SigmaskHow},
     },
 };
 use rocket::tokio::task::spawn_blocking;
@@ -21,6 +21,27 @@ pub const PROCESS_STDOUT_FILE_NAME: &'static str = "stdout";
 pub const PROCESS_STDERR_FILE_NAME: &'static str = "stderr";
 pub const PROCESS_STATUS_FILE_NAME: &'static str = "status";
 pub const PROCESS_CWD_DIR_NAME: &'static str = "cwd";
+
+/// reset signal handlers:
+/// * unblock all signal mask
+/// * reset all signal handler to default
+fn reset_signals() -> Result<(), String> {
+    // clear signal mask
+    sigprocmask(SigmaskHow::SIG_UNBLOCK, Some(&SigSet::all()), None)
+        .map_err(|_| "Failed to clean signal mask".to_string())?;
+    // reset all sigaction to default
+    for sig in Signal::iterator() {
+        // SIGKILL and SIGSTOP cannot be altered on unix
+        if sig == Signal::SIGKILL || sig == Signal::SIGSTOP {
+            continue;
+        }
+        unsafe { 
+            signal(sig, SigHandler::SigDfl)
+                .map_err(|_| format!("Could not reset signal '{}' to default", sig.as_str()))?;
+        }
+    }
+    Ok(())
+}
 
 /// use `dup2()` to open a file and assign it to a given File descriptor
 /// (even if it already exists)
@@ -46,7 +67,7 @@ fn close_everything_but_stderr_stdout_and_pipe(pipe: &Pipe) -> Result<(), String
                 .to_string_lossy()
                 .to_string();
             let fd: i32 = file_name.parse().map_err(|_| "parse error".to_string())?;
-            if fd != STDOUT_FILENO && fd != STDERR_FILENO && !pipe.is_write_fd(fd) {
+            if fd != STDOUT_FILENO && fd != STDERR_FILENO && !pipe.is_fd(fd) {
                 descriptors_to_close.push(fd);
             }
         }
@@ -54,7 +75,7 @@ fn close_everything_but_stderr_stdout_and_pipe(pipe: &Pipe) -> Result<(), String
     // then close them in a second step,
     // (to avoid closing the /proc/self/fd as we're crawling it.)
     for fd in descriptors_to_close {
-        let _ = close(fd);
+        let _ = close(fd); // ignore failure
     }
     Ok(())
 }
@@ -135,9 +156,7 @@ impl Process {
                             // Change directory to '$cwd'
                             chdir(&cwd).expect("could not change directory to '$cwd'. ");
 
-                            // clear signal mask
-                            sigprocmask(SigmaskHow::SIG_UNBLOCK, Some(&SigSet::all()), None)
-                                .expect("Failed to clean signal mask");
+                            reset_signals().expect("failed to reset signals");
 
                             // Build the command line
                             // * build command args
