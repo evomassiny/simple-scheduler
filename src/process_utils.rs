@@ -1,6 +1,6 @@
 use nix::{
-    libc::{ c_char, c_int, c_ulong, c_void, memset, prctl, strlen, strncpy, PR_SET_NAME, PT_NULL, STDERR_FILENO, STDOUT_FILENO},
-    unistd::{close, dup2, },
+    libc::{ c_char, c_int, c_ulong, c_void, memset, prctl, strlen, strncpy, PR_SET_NAME, PT_NULL},
+    unistd::{close, dup2},
     sys::{
         signal::{signal, SigHandler, Signal, sigprocmask, SigSet, SigmaskHow},
     },
@@ -11,8 +11,8 @@ use std::{
     env,
     ffi::CString,
     path::{Path, PathBuf},
+    convert::TryInto,
 };
-use crate::pipe::Pipe;
 
 /** 
  * This file is dedicated to the implementation of `rename_current_process()`.
@@ -120,23 +120,30 @@ pub fn assign_file_to_fd(file_path: &Path, fd: RawFd) -> Result<(), String> {
 
 /// Close all files openned by the caller process but stdin/stdout and the pipe:
 /// NOTE: it iters `/proc/self/fd` and call `close()` on everything (but stdin / stdout)
-pub fn close_everything_but_stderr_stdout_and_pipe(pipe: &Pipe) -> Result<(), String> {
+pub fn close_everything_but(file_descriptors: &[RawFd]) -> Result<(), String> {
     let mut descriptors_to_close: Vec<i32> = Vec::new();
     // first collect all descriptors,
     {
         let fd_entries = std::fs::read_dir("/proc/self/fd").expect("could not read /proc/self/fd");
-        for entry in fd_entries {
+        'directory_listing: for entry in fd_entries {
             let file_name: String = entry
                 .map_err(|_| "entry error".to_string())?
                 .file_name()
                 .to_string_lossy()
                 .to_string();
-            let fd: i32 = file_name.parse().map_err(|_| "parse error".to_string())?;
-            if fd != STDOUT_FILENO && fd != STDERR_FILENO && !pipe.is_fd(fd) {
-                descriptors_to_close.push(fd);
+            let int_fd: i32 = file_name.parse().map_err(|_| "parse error".to_string())?;
+
+            // check if the file is not in the black list
+            let fd: RawFd = int_fd.try_into().map_err(|_| "parse error".to_string())?;
+            for fd_to_keep in file_descriptors {
+                if fd == *fd_to_keep {
+                    continue 'directory_listing;
+                }
             }
+            descriptors_to_close.push(int_fd);
         }
     }
+
     // then close them in a second step,
     // (to avoid closing the /proc/self/fd as we're crawling it.)
     for fd in descriptors_to_close {
@@ -166,10 +173,8 @@ pub const PROCESS_STDOUT_FILE_NAME: &'static str = "stdout";
 pub const PROCESS_STDERR_FILE_NAME: &'static str = "stderr";
 /// status file name
 pub const PROCESS_STATUS_FILE_NAME: &'static str = "status";
-/// named pipe scheduler -> monitor
-pub const TO_MONITOR_PIPE: &'static str = "to_monitor.sock";
-/// named pipe monitor -> scheduler
-pub const FROM_MONITOR_PIPE: &'static str = "from_monitor.sock";
+/// Unix socket: hypervisor <-> monitor
+pub const IPC_SOCKET: &'static str = "monitor.sock";
 /// CWD directory name
 pub const PROCESS_CWD_DIR_NAME: &'static str = "cwd";
 
@@ -181,8 +186,7 @@ pub struct MonitorHandle {
     pub stderr: PathBuf,
     pub status: PathBuf,
     pub cwd: PathBuf,
-    pub to_monitor: PathBuf,
-    pub from_monitor: PathBuf,
+    pub monitor_socket: PathBuf,
 }
 
 impl MonitorHandle {
@@ -204,16 +208,14 @@ impl MonitorHandle {
         let stdout_path = output_dir.join(&PROCESS_STDOUT_FILE_NAME);
         let stderr_path = output_dir.join(&PROCESS_STDERR_FILE_NAME);
         let status_path = output_dir.join(&PROCESS_STATUS_FILE_NAME);
-        let to_monitor = output_dir.join(&TO_MONITOR_PIPE);
-        let from_monitor = output_dir.join(&FROM_MONITOR_PIPE);
+        let monitor_socket = output_dir.join(&IPC_SOCKET);
         Ok(
             Self {
                 stdout: stdout_path,
                 stderr: stderr_path,
                 status: status_path,
                 cwd: cwd,
-                to_monitor: to_monitor,
-                from_monitor: from_monitor,
+                monitor_socket: monitor_socket,
 
             }
         )

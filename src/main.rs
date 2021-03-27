@@ -24,10 +24,10 @@ async fn index() -> &'static str {
 
 #[get("/spawn")]
 async fn spawn(pool: State<'_, SqlitePool>) -> String {
-    if let Ok(process) = models::Process::spawn_daemon("sleep 60 && echo $(date)", 1).await {
-        return format!("Spawned PID: {}", process.pid);
+    match models::Process::spawn_daemon("sleep 60 && echo $(date)", 1).await {
+        Ok(process) => format!("Spawned PID: {}", process.pid),
+        Err(error) => format!("Failed: {:?}", error),
     }
-    format!("Failed")
 }
 
 

@@ -1,18 +1,19 @@
 use nix::{
     libc::{exit, EXIT_SUCCESS, STDERR_FILENO, STDOUT_FILENO},
-    unistd::{Pid, mkfifo, chdir, execv, fork, getpid, setsid, access, close, ForkResult, AccessFlags},
-    fcntl::{open, OFlag},
+    unistd::{Pid, chdir, execv, fork, getpid, setsid, close, ForkResult},
     sys::{
         epoll::{epoll_create, epoll_ctl, epoll_wait, EpollOp, EpollEvent, EpollFlags},
         signalfd::{signalfd, SfdFlags, SIGNALFD_NEW},
         signal::{Signal, SigSet},
-        stat::Mode,
         wait::waitpid,
     },
 };
 use rocket::tokio::task::spawn_blocking;
 use std::{
-    os::unix::io::{RawFd, IntoRawFd},
+    os::unix::{
+        net::{UnixListener, UnixStream},
+        io::{RawFd, AsRawFd, IntoRawFd},
+    },
     ffi::CString,
     convert::TryInto,
 };
@@ -22,39 +23,27 @@ use crate::pipe::Pipe;
 use crate::process_utils::{
     reset_signal_handlers,
     assign_file_to_fd,
-    close_everything_but_stderr_stdout_and_pipe,
+    close_everything_but,
     rename_current_process,
     block_sigchild,
     MonitorHandle,
 };
 
 /// This is the main monitor loop, it:
-/// * creates 2 fifos:
-///   * One to listen from the hypervisor commands (`handle.to_monitor`),
-///   * One to write reponse to the hypervisor (`handle.from_monitor`)
+/// * creates an Unix Domain socket to listen for hypervisor commands (`handle.monitor_socket`),
 /// * poll for 2 kind of event: the child termination or an hypervisor command
-/// * respond to the command through the `handle.from_monitor` fifo.
+/// * respond to the command through the `handle.monitor_socket` socket.
 fn monitor_loop(_child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn std::error::Error>> {
     // TODO:
     // * write child status after its termination (into `handle.status`),
-    // * notify the hypervisor when the child terminates using the `handle.from_monitor` fifo, 
+    // * notify the hypervisor when the child terminates using the `handle.monitor_socket`
     // * setup command parsing (if needed)
 
-    let USER_RW_PERM: Mode = Mode::S_IRUSR | Mode::S_IWUSR;
-    // create to_monitor and from_monitor fifo
-    if let Err(_) = access(&handle.to_monitor, AccessFlags::F_OK) {
-        mkfifo(&handle.to_monitor, USER_RW_PERM)?;
-    }
-    if let Err(_) = access(&handle.from_monitor, AccessFlags::F_OK) {
-        mkfifo(&handle.from_monitor, USER_RW_PERM)?;
-    }
-    // open `from_monitor` fifo (write end) in READ/WRITE mode, otherwise it would 
-    // if no one has is reading it. Also opens it in BLOCKINGLY.
-    let write_end_fd: RawFd = open(&handle.from_monitor, OFlag::O_RDWR, USER_RW_PERM)?;
-    // open `to_monitor` fifo, NON-BLOCKINGLY, in read only
-    // (we will poll it along with the sigchild fd).
-    let read_end_fd: RawFd = open(&handle.to_monitor, OFlag::O_NONBLOCK | OFlag::O_RDONLY, Mode::S_IRUSR)?;
-    
+    // create the Unix socket
+    let listener = UnixListener::bind(&handle.monitor_socket)?;
+    listener.set_nonblocking(true)?;
+    let listener_fd: RawFd = listener.as_raw_fd();
+
     // open SIG_CHLD as a RawFd, so we can poll it
     let mut mask = SigSet::empty();
     mask.add(Signal::SIGCHLD);
@@ -71,14 +60,15 @@ fn monitor_loop(_child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn s
     // 2 - submit it using epoll_ctl
     let mut sigchild_event = EpollEvent::new(EpollFlags::EPOLLIN, sigchild_fd.try_into()?);
     epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, sigchild_fd, Some(&mut sigchild_event))?;
-    // same process for `read_end_fd`
-    let mut read_end_event = EpollEvent::new(EpollFlags::EPOLLIN, read_end_fd.try_into()?);
-    epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, read_end_fd, Some(&mut read_end_event))?;
+    // same process for `listener_fd`
+    let mut listener_event = EpollEvent::new(EpollFlags::EPOLLIN, listener_fd.try_into()?);
+    epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, listener_fd, Some(&mut listener_event))?;
 
     // create a empty event array, that we will feed to epoll_wait()
     let mut events: Vec<EpollEvent> = (0..10)
         .map(|_| EpollEvent::empty())
         .collect();
+
     // start the event loop
     const WAIT_FOREVER_TIMEOUT: isize = -1;
     'event_loop: while let Ok(event_count) = epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT) {
@@ -87,7 +77,7 @@ fn monitor_loop(_child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn s
             let fd: RawFd = events[event_idx].data().try_into()?;
             // read the concerned file descriptor
             match fd {
-                fd if fd == read_end_fd => { println!("Can read stuff from to_monitor fifo !") },
+                fd if fd == listener_fd => { println!("Can read stuff from to_monitor fifo !") },
                 fd if fd == sigchild_fd => {
                     println!("child returned");
                     break 'event_loop;
@@ -99,8 +89,6 @@ fn monitor_loop(_child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn s
     // Close all opened RawFds
     close(epoll_fd)?;
     close(sigchild_fd)?;
-    close(read_end_fd)?;
-    close(write_end_fd)?;
 
     Ok(())
 }
@@ -154,7 +142,13 @@ impl Process {
                             let _ = setsid().expect("Failed to detach");
 
                             // Close all files but stdin/stdout and the pipe:
-                            close_everything_but_stderr_stdout_and_pipe(&pipe)
+                            let fd_to_keep: [RawFd; 4] = [
+                                STDERR_FILENO as RawFd,
+                                STDOUT_FILENO as RawFd,
+                                pipe.write_end_fd(),
+                                pipe.read_end_fd(),
+                            ];
+                            close_everything_but(&fd_to_keep[..])
                                 .expect("Could not close fd");
 
                             // set STDERR and STDOUT to files
@@ -197,7 +191,6 @@ impl Process {
                                     // change process name to a distinct one (from the server)
                                     let monitor_name = format!("monitor {}", id);
                                     let _ = rename_current_process(&monitor_name);
-                                    pipe.close_reader().expect("Could not close pipe");
 
                                     // send the monitor PID to the caller process
                                     let self_pid = getpid();
@@ -225,7 +218,6 @@ impl Process {
                 // waits for grandchild's PID reception,
                 // and returns a `Process` instance
                 ForkResult::Parent { child, .. } => {
-                    pipe.close_writer()?;
                     let grandchild: i32 = pipe.recv_int()?;
                     pipe.close()?;
                     // wait for child (so its not a zombie process)
