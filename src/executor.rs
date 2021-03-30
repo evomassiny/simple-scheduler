@@ -12,10 +12,12 @@ use rocket::tokio::task::spawn_blocking;
 use std::{
     os::unix::{
         net::{UnixListener, UnixStream},
-        io::{RawFd, AsRawFd, IntoRawFd},
+        io::{RawFd, AsRawFd},
     },
     ffi::CString,
     convert::TryInto,
+    collections::HashMap,
+    io::Read,
 };
 
 use crate::models::Process;
@@ -29,10 +31,20 @@ use crate::process_utils::{
     MonitorHandle,
 };
 
-/// This is the main monitor loop, it:
+/// Epoll will wait forever (unless an event happens) if this timout value is provided
+const WAIT_FOREVER_TIMEOUT: isize = -1;
+
+/// This is the main monitor loop.
+///
+/// It runs in a single thread while the process is running,
+/// it listens on a Unix Domain Socket for commands, and quits when the process is terminated.
+///
+/// In details, it:
 /// * creates an Unix Domain socket to listen for hypervisor commands (`handle.monitor_socket`),
-/// * poll for 2 kind of event: the child termination or an hypervisor command
-/// * respond to the command through the `handle.monitor_socket` socket.
+/// * poll for 2 kind of event: the child termination or connection to the socket
+/// * when a connection happens, polls the resulting stream as well
+/// * read data from the stream and interprets it as a command.
+/// * write reponse data into the same stream.
 fn monitor_loop(_child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn std::error::Error>> {
     // TODO:
     // * write child status after its termination (into `handle.status`),
@@ -69,26 +81,56 @@ fn monitor_loop(_child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn s
         .map(|_| EpollEvent::empty())
         .collect();
 
-    // start the event loop
-    const WAIT_FOREVER_TIMEOUT: isize = -1;
+    // stores connection streams
+    let mut streams_by_fd: HashMap<RawFd, UnixStream> = HashMap::new();
+    let mut streams = listener.incoming().into_iter();
+    // start the event loop:
     'event_loop: while let Ok(event_count) = epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT) {
         for event_idx in 0..event_count {
             // fetch the data we've associated with the event (file descriptors)
             let fd: RawFd = events[event_idx].data().try_into()?;
             // read the concerned file descriptor
             match fd {
-                fd if fd == listener_fd => { println!("Can read stuff from to_monitor fifo !") },
                 fd if fd == sigchild_fd => {
+                    // the child just finished
                     println!("child returned");
                     break 'event_loop;
                 },
-                _ => panic!("unsuscribed ")
+                // Here we are notified that a client connected to the socket
+                fd if fd == listener_fd => { 
+                    // won't block (epolled)
+                    let stream = streams.next()
+                        .ok_or(format!("No stream available (unreachable)"))??;
+                    // register the stream to the epoll_fd
+                    let stream_fd: RawFd = stream.as_raw_fd();
+                    println!("Submitting fd: '{}' for listening", &stream_fd);
+                    let mut event = EpollEvent::new(EpollFlags::EPOLLIN, stream_fd.try_into()?);
+                    epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, stream_fd, Some(&mut event))?;
+                    // store the stream
+                    streams_by_fd.insert(stream_fd, stream);
+
+                },
+                // here we are notified that data is ready to read on one of the connection
+                stream_fd => {
+                    // fetch the stream for the fd, and process the request
+                    let mut stream = streams_by_fd.remove(&stream_fd)
+                        .ok_or(format!("No stream using this RawFD (unreachable)"))?;
+                    // unregister the stream from the epoll
+                    epoll_ctl(epoll_fd, EpollOp::EpollCtlDel, stream_fd, None)?;
+                    // read data from the stream
+                    let mut buffer = Vec::new();
+                    stream.read_to_end(&mut buffer)?;
+                    // TODO: read command, return reponce.
+                    println!("reading from '{}': {:?}", &stream_fd, &buffer);
+                }
             }
         }
     }
     // Close all opened RawFds
     close(epoll_fd)?;
     close(sigchild_fd)?;
+    // remove the socket file
+    std::fs::remove_file(&handle.monitor_socket)?;
 
     Ok(())
 }
