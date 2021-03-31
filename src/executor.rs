@@ -1,9 +1,9 @@
 use nix::{
-    libc::{exit, EXIT_SUCCESS, STDERR_FILENO, STDOUT_FILENO},
+    libc::{self, exit, EXIT_SUCCESS, STDERR_FILENO, STDOUT_FILENO},
     unistd::{Pid, chdir, execv, fork, getpid, setsid, close, ForkResult},
     sys::{
         epoll::{epoll_create, epoll_ctl, epoll_wait, EpollOp, EpollEvent, EpollFlags},
-        signalfd::{signalfd, SfdFlags, SIGNALFD_NEW},
+        signalfd::{SignalFd, signalfd, SfdFlags, siginfo, SIGNALFD_NEW},
         signal::{Signal, SigSet},
         wait::waitpid,
     },
@@ -34,6 +34,58 @@ use crate::process_utils::{
 /// Epoll will wait forever (unless an event happens) if this timout value is provided
 const WAIT_FOREVER_TIMEOUT: isize = -1;
 
+/// Represents all the states of a monitoree process
+#[derive(Debug)]
+pub enum Status {
+    Stopped,
+    Killed,
+    Failed,
+    Succeed,
+    Running,
+}
+impl Status {
+    /// Build a Status from the siginfo struct returned by reading a SIGCHLD signalfd 
+    /// based on `man 2 sigaction`
+    pub fn from_siginfo(info: &siginfo) -> Result<Self, String> {
+        // check the signal that was bound to the signalfd this siginfo is the result of.
+        if info.ssi_signo != libc::SIGCHLD as u32 {
+            return Err("not a SIG_CHLD siginfo".to_string());
+        }
+        match info.ssi_code {
+            libc::CLD_EXITED => {
+                match info.ssi_status {
+                    libc::EXIT_SUCCESS => Ok(Self::Succeed),
+                    libc::EXIT_FAILURE => Ok(Self::Failed),
+                    unknown => Err(format!("Unkown return status code '{}' in siginfo", unknown)),
+                }
+            },
+            libc::CLD_KILLED  => Ok(Self::Killed),
+            libc::CLD_DUMPED => Ok(Self::Failed),
+            libc::CLD_TRAPPED  => Ok(Self::Failed),
+            libc::CLD_STOPPED => Ok(Self::Stopped),
+            libc::CLD_CONTINUED => Ok(Self::Running),
+            unknown => Err(format!("Unkown status code '{}' in siginfo", unknown)),
+        }
+    }
+
+    /// returns either or not the process is still running.
+    pub fn is_terminated(&self) -> bool {
+        match *self {
+            Self::Stopped => false,
+            Self::Killed => true,
+            Self::Failed => true,
+            Self::Succeed => true,
+            Self::Running => false,
+        }
+    }
+}
+
+
+fn write_return_status(status: &Status, handle: &MonitorHandle)  -> Result<(), Box<dyn std::error::Error>> {
+    // TODO!
+    todo!();
+}
+
 /// This is the main monitor loop.
 ///
 /// It runs in a single thread while the process is running,
@@ -45,7 +97,7 @@ const WAIT_FOREVER_TIMEOUT: isize = -1;
 /// * when a connection happens, polls the resulting stream as well
 /// * read data from the stream and interprets it as a command.
 /// * write reponse data into the same stream.
-fn monitor_loop(_child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn std::error::Error>> {
+fn monitor_loop(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn std::error::Error>> {
     // TODO:
     // * write child status after its termination (into `handle.status`),
     // * notify the hypervisor when the child terminates using the `handle.monitor_socket`
@@ -59,7 +111,8 @@ fn monitor_loop(_child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn s
     // open SIG_CHLD as a RawFd, so we can poll it
     let mut mask = SigSet::empty();
     mask.add(Signal::SIGCHLD);
-    let sigchild_fd: RawFd = signalfd(SIGNALFD_NEW, &mask, SfdFlags::SFD_NONBLOCK)?;
+    let mut sigchild_reader = SignalFd::with_flags(&mask, SfdFlags::SFD_NONBLOCK)?;
+    let sigchild_fd: RawFd = sigchild_reader.as_raw_fd();
 
     // setup epoll 
     let epoll_fd: RawFd = epoll_create()?;
@@ -84,19 +137,26 @@ fn monitor_loop(_child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn s
     // stores connection streams
     let mut streams_by_fd: HashMap<RawFd, UnixStream> = HashMap::new();
     let mut streams = listener.incoming().into_iter();
+    // assume running status
+    let mut process_status: Status = Status::Running;
     // start the event loop:
     'event_loop: while let Ok(event_count) = epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT) {
         for event_idx in 0..event_count {
             // fetch the data we've associated with the event (file descriptors)
             let fd: RawFd = events[event_idx].data().try_into()?;
-            // read the concerned file descriptor
             match fd {
+                // the monitoree has terminated
                 fd if fd == sigchild_fd => {
-                    // the child just finished
-                    println!("child returned");
-                    break 'event_loop;
+                    process_status = match sigchild_reader.read_signal() {
+                        Ok(Some(siginfo)) => Status::from_siginfo(&siginfo).unwrap_or(Status::Failed),
+                        _ => Status::Failed,  // assume failure, if nothing is returned
+                    };
+                    if process_status.is_terminated() {
+                        println!("Child returned with status '{:?}'", &process_status);
+                        break 'event_loop;
+                    }
                 },
-                // Here we are notified that a client connected to the socket
+                // a client connected to the socket
                 fd if fd == listener_fd => { 
                     // won't block (epolled)
                     let stream = streams.next()
@@ -110,7 +170,7 @@ fn monitor_loop(_child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn s
                     streams_by_fd.insert(stream_fd, stream);
 
                 },
-                // here we are notified that data is ready to read on one of the connection
+                // data is ready to read on one of the connection
                 stream_fd => {
                     // fetch the stream for the fd, and process the request
                     let mut stream = streams_by_fd.remove(&stream_fd)
@@ -149,7 +209,7 @@ impl Process {
      *  This function use blocking calls, and should not be called in an async
      *  runtime.
      *
-     *  see https://www.freedesktop.org/software/systemd/man/daemon.html
+     *  see `<https://www.freedesktop.org/software/systemd/man/daemon.html>`
      *
      *  SAFETY: This method uses unsafe unix calls to spawn the process
      *  **as a daemon process**, so it can outlive the caller process.
