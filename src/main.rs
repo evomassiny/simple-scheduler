@@ -11,7 +11,9 @@ pub mod executor;
 pub mod pipe;
 pub mod process_utils;
 
-use sqlx::sqlite::{SqlitePoolOptions,SqlitePool};
+use sqlx::{
+    sqlite::{SqlitePoolOptions, SqlitePool},
+};
 use rocket::State;
 use dotenv::dotenv;
 
@@ -33,10 +35,12 @@ async fn spawn(pool: State<'_, SqlitePool>) -> String {
 #[rocket::main]
 async fn main() {
     dotenv().expect("Failed reading .env");
+    let url = std::env::var("DATABASE_URL")
+        .expect("No DATABASE_URL environment variable set");
     // Build database connection pool
     let pool = SqlitePoolOptions::new()
         .max_connections(16)
-        .connect("sqlite:database.sqlite")
+        .connect(&url)
         .await
         .expect("Could not connect to database.");
     let result = rocket::ignite()

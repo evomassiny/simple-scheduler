@@ -1,9 +1,10 @@
 # install
 ```
-rustup override set nightly
-cargo install diesel
-diesel migrations run
+cargo install sqlx-cli
+sqlx database create
+sqlx migration run 
 ```
+
 # Internals
 ## Spawning process
 To spawn a new task, the hypervisor will also spawn a **monitor** process, which

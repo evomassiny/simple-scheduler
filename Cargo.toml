@@ -9,15 +9,12 @@ edition = "2018"
 # main server framework
 rocket = {git = "https://github.com/SergioBenitez/Rocket", branch = "master"}
 # async sql queries
-sqlx = { version = "0.5", features = [ "runtime-tokio-rustls", "chrono", "sqlite", "migrate", "macros" ] }
+sqlx = { version = "*", features = [ "runtime-tokio-rustls", "chrono", "sqlite", "migrate", "macros", "offline"] }
 async-trait = "0.1.48"
 
-dotenv = "0.15.0"
-nix = "0.20"
-chrono = { version = "0.4", features = ["serde"] }
-
-[global.databases]
-task_db = { url = "./database.sqlite" }
+dotenv = "*"
+nix = "*"
+chrono = { version = "*", features = ["serde"] }
 
 [dependencies.rocket_contrib]
 git = "https://github.com/SergioBenitez/Rocket"

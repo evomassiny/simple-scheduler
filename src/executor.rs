@@ -82,6 +82,7 @@ impl Status {
 
 
 fn write_return_status(status: &Status, handle: &MonitorHandle)  -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = handle.status.join(".tmp");
     // TODO!
     todo!();
 }
@@ -315,7 +316,7 @@ impl Process {
                             exit(EXIT_SUCCESS);
                         }
                     }
-                }
+                },
                 // Caller process,
                 // waits for grandchild's PID reception,
                 // and returns a `Process` instance
@@ -328,8 +329,8 @@ impl Process {
                         id: 0,
                         pid: grandchild,
                     })
-                }
-            };
+                },
+            }
         }
     }
 
