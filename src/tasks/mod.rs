@@ -4,6 +4,7 @@ mod monitor;
 mod monitor_handle;
 mod utils;
 mod executor;
+mod query;
 
 pub use crate::tasks::monitor_handle::MonitorHandle;
 

@@ -8,14 +8,12 @@ pub struct Job {
     pub status: u8,
 }
 
-
 #[derive(Debug)]
 pub struct Task {
     pub id: i32,
     pub name: String,
     pub status: u8,
     pub command: String,
-    pub process: i32,
     pub job: i32,
 }
 

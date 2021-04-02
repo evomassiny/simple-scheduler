@@ -3,6 +3,8 @@ use std::{
     fs,
     path::{Path,PathBuf},
 };
+use crate::tasks::task_status::TaskStatus;
+use crate::tasks::query::Query;
 
 /// Name of the environment var that holds a path to the process directory
 pub const PROCESS_DIR_ENV_NAME: &str = "PROCESS_DIR";
@@ -13,7 +15,7 @@ pub const PROCESS_STDOUT_FILE_NAME: &str = "stdout";
 /// stderr file name
 pub const PROCESS_STDERR_FILE_NAME: &str = "stderr";
 /// status file name
-pub const PROCESS_STATUS_FILE_NAME: &str = "status";
+pub const PROCESS_STATUS_FILE_NAME: &str = "return_status";
 /// Unix socket: hypervisor <-> monitor
 pub const IPC_SOCKET: &str = "monitor.sock";
 /// CWD directory name
@@ -86,5 +88,19 @@ impl MonitorHandle {
         self.monitor_socket = self.directory.join(&IPC_SOCKET);
 
         Ok(())
+    }
+
+    pub async fn kill() -> Result<(), Box<dyn std::error::Error>> {
+        let query: Vec<u8> = Query::Kill.to_bytes()?;
+        todo!()
+    }
+
+    pub async fn terminate() -> Result<(), Box<dyn std::error::Error>> {
+        let query: Vec<u8> = Query::Terminate.to_bytes()?;
+        todo!()
+    }
+
+    pub async fn get_status() -> Result<TaskStatus, Box<dyn std::error::Error>> {
+        todo!()
     }
 }

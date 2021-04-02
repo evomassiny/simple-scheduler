@@ -14,6 +14,7 @@ use std::{
     convert::TryInto,
     collections::HashMap,
     io::Read,
+    path::PathBuf,
 };
 use crate::tasks::monitor_handle::MonitorHandle;
 use crate::tasks::task_status::TaskStatus;
@@ -85,7 +86,8 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box
                 // the monitoree has terminated
                 fd if fd == sigchild_fd => {
                     process_status = match sigchild_reader.read_signal() {
-                        Ok(Some(siginfo)) => TaskStatus::from_siginfo(&siginfo).unwrap_or(TaskStatus::Failed),
+                        Ok(Some(siginfo)) => TaskStatus::from_siginfo(&siginfo)
+                            .unwrap_or(TaskStatus::Failed),
                         _ => TaskStatus::Failed,  // assume failure, if nothing is returned
                     };
                     if process_status.is_terminated() {
@@ -100,7 +102,6 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box
                         .ok_or(format!("No stream available (unreachable)"))??;
                     // register the stream to the epoll_fd
                     let stream_fd: RawFd = stream.as_raw_fd();
-                    println!("Submitting fd: '{}' for listening", &stream_fd);
                     let mut event = EpollEvent::new(EpollFlags::EPOLLIN, stream_fd.try_into()?);
                     epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, stream_fd, Some(&mut event))?;
                     // store the stream
@@ -118,14 +119,13 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box
                     let mut buffer = Vec::new();
                     stream.read_to_end(&mut buffer)?;
                     // TODO: read command, return reponce.
-                    println!("reading from '{}': {:?}", &stream_fd, &buffer);
                 }
             }
         }
     }
     // Close all opened RawFds
     close(epoll_fd)?;
-    //close(sigchild_fd)?;
+    // close(sigchild_fd)?;
     // remove the socket file
     std::fs::remove_file(&handle.monitor_socket)?;
 
