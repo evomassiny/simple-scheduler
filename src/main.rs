@@ -5,6 +5,8 @@ extern crate chrono;
 extern crate nix;
 extern crate sqlx;
 extern crate dotenv;
+extern crate serde;
+extern crate serde_json;
 
 pub mod models;
 pub mod executor;
@@ -25,7 +27,7 @@ async fn index() -> &'static str {
 
 #[get("/spawn")]
 async fn spawn(pool: State<'_, SqlitePool>) -> String {
-    match models::Process::spawn_daemon("sleep 60 && echo $(date)", 1).await {
+    match models::Process::spawn_daemon("sleep 30 && echo $(date)", 1).await {
         Ok(process) => format!("Spawned PID: {}", process.pid),
         Err(error) => format!("Failed: {:?}", error),
     }

@@ -195,7 +195,9 @@ impl MonitorHandle {
             .unwrap_or_else(|_| env::temp_dir().to_string_lossy().to_string());
 
         // create process directory
-        let output_dir = Path::new(&processes_dir).join(&format!("{}{}", PROCESS_OUTPUT_DIR_PREFIX, task_id));
+        let output_dir = Path::new(&processes_dir)
+            .join(&format!("{}{}", PROCESS_OUTPUT_DIR_PREFIX, task_id))
+            .canonicalize()?;
         fs::create_dir_all(&output_dir)?;
 
         // create process CWD directory, the process will live inside

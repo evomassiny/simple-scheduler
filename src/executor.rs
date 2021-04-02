@@ -19,6 +19,8 @@ use std::{
     collections::HashMap,
     io::Read,
 };
+use serde::{Serialize, Deserialize};
+use serde_json;
 
 use crate::models::Process;
 use crate::pipe::Pipe;
@@ -35,7 +37,7 @@ use crate::process_utils::{
 const WAIT_FOREVER_TIMEOUT: isize = -1;
 
 /// Represents all the states of a monitoree process
-#[derive(Debug)]
+#[derive(Debug,Serialize,Deserialize)]
 pub enum Status {
     Stopped,
     Killed,
@@ -82,9 +84,14 @@ impl Status {
 
 
 fn write_return_status(status: &Status, handle: &MonitorHandle)  -> Result<(), Box<dyn std::error::Error>> {
-    let tmp = handle.status.join(".tmp");
-    // TODO!
-    todo!();
+    let mut tmp = handle.status.clone();
+    tmp.set_file_name(".status-tmp");
+    std::fs::write(&tmp, serde_json::to_string(status)?)
+        .map_err(|e| format!("Could not write {:?}, {:?}", &tmp, e))?;
+    // rename is atomic if both paths are in the same mount point.
+    std::fs::rename(&tmp, &handle.status)
+        .map_err(|e| format!("Could not create {:?}, {:?}", &handle.status, e))?;
+    Ok(())
 }
 
 /// This is the main monitor loop.
@@ -105,7 +112,8 @@ fn monitor_loop(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn st
     // * setup command parsing (if needed)
 
     // create the Unix socket
-    let listener = UnixListener::bind(&handle.monitor_socket)?;
+    let listener = UnixListener::bind(&handle.monitor_socket)
+        .map_err(|e| format!("Could not create monitor socket: '{:?}'. '{:?}'", &handle.monitor_socket, e))?;
     listener.set_nonblocking(true)?;
     let listener_fd: RawFd = listener.as_raw_fd();
 
@@ -154,6 +162,7 @@ fn monitor_loop(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn st
                     };
                     if process_status.is_terminated() {
                         println!("Child returned with status '{:?}'", &process_status);
+                        write_return_status(&process_status, &handle)?;
                         break 'event_loop;
                     }
                 },
@@ -189,7 +198,7 @@ fn monitor_loop(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn st
     }
     // Close all opened RawFds
     close(epoll_fd)?;
-    close(sigchild_fd)?;
+    //close(sigchild_fd)?;
     // remove the socket file
     std::fs::remove_file(&handle.monitor_socket)?;
 
