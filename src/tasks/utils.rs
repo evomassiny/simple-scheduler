@@ -6,16 +6,16 @@ use nix::{
     },
 };
 use std::{
-    fs::{self, File},
+    fs::File,
     os::unix::io::{RawFd, IntoRawFd},
-    env,
     ffi::CString,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 /** 
- * This file is dedicated to the implementation of `rename_current_process()`.
- *  It relies on a dirty hack to retreive the `argv[]` pointer:
+ * Those 2 statis variables file are dedicated to the implementation of `rename_current_process()`.
+ *
+ *  This function relies on a dirty hack to retreive the `argv[]` pointer:
  *  * it defines a function that will be placed in the ".init_array.00098" section of the program.
  *  * the glibc calls all functions of this section at the startup with the usual `argc` and `argv`
  *    arguments.
@@ -30,13 +30,10 @@ use std::{
  * SAFETY: This uses a lot of C API, and raw pointer dereferencing, 
  * it cannot be implemented safely.
  */ 
-
-  
-
-// similar to C's argc main() argument
-static mut ARGC: c_int = 0;
-// similar to C's argv main() argument
+/// similar to C's argv main() argument
 static mut ARGV: *const *const u8 = PT_NULL as *const *const u8;
+/// similar to C's argc main() argument
+static mut ARGC: c_int = 0;
 
 /// This function's only purpose is to store the values of `argc` and `argv`.
 /// SAFETY: This function mutates static variables, so it is inherently to be unsafe,
@@ -159,65 +156,4 @@ pub fn block_sigchild() -> Result<(), String> {
     mask.add(Signal::SIGCHLD);
     mask.thread_block().map_err(|_| "Could not mask SIGCHLD".to_string())?;
     Ok(())
-}
-
-/// Name of the environment var that holds a path to the process directory
-pub const PROCESS_DIR_ENV_NAME: &str = "PROCESS_DIR";
-/// Prefix of the process directory
-pub const PROCESS_OUTPUT_DIR_PREFIX: &str = "process-output-";
-/// stdout file name
-pub const PROCESS_STDOUT_FILE_NAME: &str = "stdout";
-/// stderr file name
-pub const PROCESS_STDERR_FILE_NAME: &str = "stderr";
-/// status file name
-pub const PROCESS_STATUS_FILE_NAME: &str = "status";
-/// Unix socket: hypervisor <-> monitor
-pub const IPC_SOCKET: &str = "monitor.sock";
-/// CWD directory name
-pub const PROCESS_CWD_DIR_NAME: &str = "cwd";
-
-
-/// holds path related to a monitor process
-#[derive(Debug)]
-pub struct MonitorHandle {
-    pub stdout: PathBuf,
-    pub stderr: PathBuf,
-    pub status: PathBuf,
-    pub cwd: PathBuf,
-    pub monitor_socket: PathBuf,
-}
-
-impl MonitorHandle {
-    pub fn from_task_id(task_id: i32) -> Result<Self, Box<dyn std::error::Error>> {
-        // create temporary file for stdout
-        // fetch $PROCESS_DIR_ENV variable
-        let processes_dir: String = env::var(PROCESS_DIR_ENV_NAME)
-            .unwrap_or_else(|_| env::temp_dir().to_string_lossy().to_string());
-
-        // create process directory
-        let output_dir = Path::new(&processes_dir)
-            .join(&format!("{}{}", PROCESS_OUTPUT_DIR_PREFIX, task_id))
-            .canonicalize()?;
-        fs::create_dir_all(&output_dir)?;
-
-        // create process CWD directory, the process will live inside
-        let cwd = output_dir.join(&PROCESS_CWD_DIR_NAME);
-        fs::create_dir_all(&cwd)?;
-
-        // create process stdout/stderr file name
-        let stdout_path = output_dir.join(&PROCESS_STDOUT_FILE_NAME);
-        let stderr_path = output_dir.join(&PROCESS_STDERR_FILE_NAME);
-        let status_path = output_dir.join(&PROCESS_STATUS_FILE_NAME);
-        let monitor_socket = output_dir.join(&IPC_SOCKET);
-        Ok(
-            Self {
-                stdout: stdout_path,
-                stderr: stderr_path,
-                status: status_path,
-                cwd,
-                monitor_socket,
-
-            }
-        )
-    }
 }

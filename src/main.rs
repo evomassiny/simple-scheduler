@@ -8,10 +8,7 @@ extern crate dotenv;
 extern crate serde;
 extern crate serde_json;
 
-pub mod models;
-pub mod executor;
-pub mod pipe;
-pub mod process_utils;
+pub mod tasks;
 
 use sqlx::{
     sqlite::{SqlitePoolOptions, SqlitePool},
@@ -19,6 +16,7 @@ use sqlx::{
 use rocket::State;
 use dotenv::dotenv;
 
+use tasks::TaskProcess;
 
 #[get("/")]
 async fn index() -> &'static str {
@@ -27,7 +25,7 @@ async fn index() -> &'static str {
 
 #[get("/spawn")]
 async fn spawn(pool: State<'_, SqlitePool>) -> String {
-    match models::Process::spawn_daemon("sleep 30 && echo $(date)", 1).await {
+    match TaskProcess::spawn("sleep 30 && echo $(date)", 1).await {
         Ok(process) => format!("Spawned PID: {}", process.pid),
         Err(error) => format!("Failed: {:?}", error),
     }

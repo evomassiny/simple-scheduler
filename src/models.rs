@@ -8,11 +8,6 @@ pub struct Job {
     pub status: u8,
 }
 
-#[derive(Debug)]
-pub struct Process {
-    pub id: i32,
-    pub pid: i32,
-}
 
 #[derive(Debug)]
 pub struct Task {
