@@ -1,4 +1,4 @@
-#![feature(proc_macro_hygiene, decl_macro)]
+//#![feature(proc_macro_hygiene, decl_macro)]
 #[macro_use] extern crate rocket;
 #[macro_use] extern crate rocket_contrib;
 extern crate chrono;
@@ -32,7 +32,7 @@ async fn spawn(pool: State<'_, SqlitePool>) -> String {
 
 #[rocket::main]
 async fn main() {
-    dotenv().ok().expect("Failed reading .env");
+    dotenv().expect("Failed reading .env");
     // Build database connection pool
     let pool = SqlitePoolOptions::new()
         .max_connections(16)

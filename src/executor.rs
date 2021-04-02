@@ -3,7 +3,7 @@ use nix::{
     unistd::{Pid, chdir, execv, fork, getpid, setsid, close, ForkResult},
     sys::{
         epoll::{epoll_create, epoll_ctl, epoll_wait, EpollOp, EpollEvent, EpollFlags},
-        signalfd::{SignalFd, signalfd, SfdFlags, siginfo, SIGNALFD_NEW},
+        signalfd::{SignalFd, SfdFlags, siginfo, SIGNALFD_NEW},
         signal::{Signal, SigSet},
         wait::waitpid,
     },
@@ -136,7 +136,7 @@ fn monitor_loop(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn st
 
     // stores connection streams
     let mut streams_by_fd: HashMap<RawFd, UnixStream> = HashMap::new();
-    let mut streams = listener.incoming().into_iter();
+    let mut streams = listener.incoming();
     // assume running status
     let mut process_status: Status = Status::Running;
     // start the event loop:
@@ -324,10 +324,10 @@ impl Process {
                     pipe.close()?;
                     // wait for child (so its not a zombie process)
                     let _ = waitpid(child, None);
-                    return Ok(Process {
+                    Ok(Process {
                         id: 0,
                         pid: grandchild,
-                    });
+                    })
                 }
             };
         }

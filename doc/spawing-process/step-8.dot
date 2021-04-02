@@ -1,0 +1,19 @@
+digraph step {
+    rankdir="LR";
+    ranksep=0.5;
+
+    node[fontsize=20, shape=circle, width=1.8];
+    edge[penwidth=0.4, arrowsize=0.5];
+
+    "hypervisor";
+    "monitor" [color="#1aaa55", style=filled, fontcolor=white];
+    "executor"[color="#BF4042", style=filled, fontcolor=white];
+
+    "tmp"[style=invis];
+    "hypervisor" -> "tmp" [style=invis];
+    "tmp" -> "monitor" [style=invis];
+
+    "hypervisor" -> "monitor" [style=dashed, label="command\n (monitor.sock)", labelfloat=true];
+    "monitor" -> "executor"[style=invis];
+}
+

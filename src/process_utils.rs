@@ -11,7 +11,6 @@ use std::{
     env,
     ffi::CString,
     path::{Path, PathBuf},
-    convert::TryInto,
 };
 
 /** 
@@ -131,16 +130,15 @@ pub fn close_everything_but(file_descriptors: &[RawFd]) -> Result<(), String> {
                 .file_name()
                 .to_string_lossy()
                 .to_string();
-            let int_fd: i32 = file_name.parse().map_err(|_| "parse error".to_string())?;
+            let fd: RawFd = file_name.parse().map_err(|_| "parse error".to_string())?;
 
             // check if the file is not in the black list
-            let fd: RawFd = int_fd.try_into().map_err(|_| "parse error".to_string())?;
             for fd_to_keep in file_descriptors {
                 if fd == *fd_to_keep {
                     continue 'directory_listing;
                 }
             }
-            descriptors_to_close.push(int_fd);
+            descriptors_to_close.push(fd);
         }
     }
 
@@ -164,19 +162,19 @@ pub fn block_sigchild() -> Result<(), String> {
 }
 
 /// Name of the environment var that holds a path to the process directory
-pub const PROCESS_DIR_ENV_NAME: &'static str = "PROCESS_DIR";
+pub const PROCESS_DIR_ENV_NAME: &str = "PROCESS_DIR";
 /// Prefix of the process directory
-pub const PROCESS_OUTPUT_DIR_PREFIX: &'static str = "process-output-";
+pub const PROCESS_OUTPUT_DIR_PREFIX: &str = "process-output-";
 /// stdout file name
-pub const PROCESS_STDOUT_FILE_NAME: &'static str = "stdout";
+pub const PROCESS_STDOUT_FILE_NAME: &str = "stdout";
 /// stderr file name
-pub const PROCESS_STDERR_FILE_NAME: &'static str = "stderr";
+pub const PROCESS_STDERR_FILE_NAME: &str = "stderr";
 /// status file name
-pub const PROCESS_STATUS_FILE_NAME: &'static str = "status";
+pub const PROCESS_STATUS_FILE_NAME: &str = "status";
 /// Unix socket: hypervisor <-> monitor
-pub const IPC_SOCKET: &'static str = "monitor.sock";
+pub const IPC_SOCKET: &str = "monitor.sock";
 /// CWD directory name
-pub const PROCESS_CWD_DIR_NAME: &'static str = "cwd";
+pub const PROCESS_CWD_DIR_NAME: &str = "cwd";
 
 
 /// holds path related to a monitor process
@@ -214,8 +212,8 @@ impl MonitorHandle {
                 stdout: stdout_path,
                 stderr: stderr_path,
                 status: status_path,
-                cwd: cwd,
-                monitor_socket: monitor_socket,
+                cwd,
+                monitor_socket,
 
             }
         )

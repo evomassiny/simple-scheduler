@@ -1,0 +1,18 @@
+digraph step {
+    rankdir="LR";
+    ranksep=0.5;
+
+    node[fontsize=20, shape=circle, width=1.8];
+    edge[penwidth=0.4, arrowsize=0.5];
+
+    "hypervisor";
+    "monitor";
+    "executor";
+    "tmp" [style=invis];
+
+    "hypervisor" -> "tmp" [style=invis];
+    "tmp" -> "monitor" [style=invis];
+
+    "monitor" -> "executor"[label="fork()"];
+}
+
