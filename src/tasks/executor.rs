@@ -82,13 +82,13 @@ impl TaskProcess {
                                 .expect("Could not close fd");
 
                             // set STDERR and STDOUT to files
-                            assign_file_to_fd(&handle.stderr, STDERR_FILENO)
+                            assign_file_to_fd(&handle.stderr_file(), STDERR_FILENO)
                                 .expect("Failed to redirect stderr");
-                            assign_file_to_fd(&handle.stdout, STDOUT_FILENO)
+                            assign_file_to_fd(&handle.stdout_file(), STDOUT_FILENO)
                                 .expect("Failed to redirect stdout");
 
                             // Change directory to '$cwd'
-                            chdir(&handle.cwd).expect("could not change directory to '$cwd'. ");
+                            chdir(&handle.working_directory()).expect("could not change directory to '$cwd'. ");
                             
                             // block SIGCHLD signal, so we dont lose some before listening on them
                             // (might not be needed)

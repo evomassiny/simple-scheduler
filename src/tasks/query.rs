@@ -13,10 +13,10 @@ pub enum Query {
 impl Query {
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        bincode::deserialize(&bytes[..]).map_err(|e| format!("cant serialize query: {:?}", e))
+        bincode::deserialize(&bytes[..]).map_err(|e| format!("cant parse query: {:?}", e))
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
-        bincode::serialize(&self).map_err(|e| format!("cant parse query: {:?}", e))
+        bincode::serialize(&self).map_err(|e| format!("cant serialize query: {:?}", e))
     }
 }

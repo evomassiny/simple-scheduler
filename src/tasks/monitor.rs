@@ -41,8 +41,8 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box
     // * setup command parsing (if needed)
 
     // create the Unix socket
-    let listener = UnixListener::bind(&handle.monitor_socket)
-        .map_err(|e| format!("Could not create monitor socket: '{:?}'. '{:?}'", &handle.monitor_socket, e))?;
+    let listener = UnixListener::bind(&handle.monitor_socket())
+        .map_err(|e| format!("Could not create monitor socket: '{:?}'. '{:?}'", &handle.monitor_socket(), e))?;
     listener.set_nonblocking(true)?;
     let listener_fd: RawFd = listener.as_raw_fd();
 
@@ -91,7 +91,7 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box
                         _ => TaskStatus::Failed,  // assume failure, if nothing is returned
                     };
                     if process_status.is_terminated() {
-                        process_status.save_to_file(&handle.status)?;
+                        process_status.save_to_file(&handle.status_file())?;
                         break 'event_loop;
                     }
                 },
@@ -127,7 +127,7 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box
     close(epoll_fd)?;
     // close(sigchild_fd)?;
     // remove the socket file
-    std::fs::remove_file(&handle.monitor_socket)?;
+    std::fs::remove_file(&handle.monitor_socket())?;
 
     Ok(())
 }
