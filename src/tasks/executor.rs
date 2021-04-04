@@ -12,7 +12,7 @@ use std::{
 use crate::tasks::TaskProcess;
 use crate::tasks::monitor::monitor_process;
 use crate::tasks::monitor_handle::MonitorHandle;
-use crate::tasks::pipe::Pipe;
+use crate::tasks::pipe::{Pipe,Fence};
 use crate::tasks::utils::{
     reset_signal_handlers,
     assign_file_to_fd,
@@ -47,6 +47,9 @@ impl TaskProcess {
             .map_err(|e| format!("can't create task process directory {:?}", e))?;
         // create a pipe to send pid from grandchild to grandparent
         let mut pipe = Pipe::new()?;
+        // create fence to block the executor process, until the monitor 
+        // one decides to release it.
+        let fence = Fence::new()?;
 
         unsafe {
             // fork process
@@ -71,12 +74,14 @@ impl TaskProcess {
                             // detach from any terminal and create an independent session.
                             let _ = setsid().expect("Failed to detach");
 
-                            // Close all files but stdin/stdout and the pipe:
-                            let fd_to_keep: [RawFd; 4] = [
+                            // Close all files but stdin/stdout and pipes:
+                            let fd_to_keep: [RawFd; 6] = [
                                 STDERR_FILENO as RawFd,
                                 STDOUT_FILENO as RawFd,
                                 pipe.write_end_fd(),
                                 pipe.read_end_fd(),
+                                fence.write_end_fd(),
+                                fence.read_end_fd(),
                             ];
                             close_everything_but(&fd_to_keep[..])
                                 .expect("Could not close fd");
@@ -113,6 +118,7 @@ impl TaskProcess {
                                     reset_signal_handlers().expect("failed to reset signals");
                                     // Close pipe, at this point only stderr/stdout file should be open
                                     pipe.close().expect("Could not close pipe");
+                                    fence.wait_for_signal().expect("Waitinf for 'GO/NO GO' failed.");
                                     let _ = execv(&args[0], &args);
                                     unreachable!();
                                 }
@@ -128,7 +134,7 @@ impl TaskProcess {
                                     pipe.close().expect("Could not close pipe");
 
                                     // wait for child completion, and listen for request
-                                    if let Err(e) = monitor_process(child, &handle) {
+                                    if let Err(e) = monitor_process(child, &handle, fence) {
                                         eprintln!("Monitor: '{}' failed with '{:?}'", &monitor_name, e);
                                         panic!("Process monitoring Failed");
                                     }

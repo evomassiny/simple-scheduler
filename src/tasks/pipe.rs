@@ -3,8 +3,8 @@ use std::os::unix::net::{UnixStream};
 use std::io::{Read,Write};
 
 pub struct Pipe {
-    read_end: UnixStream,
-    write_end: UnixStream,
+    pub read_end: UnixStream,
+    pub write_end: UnixStream,
 }
 impl Pipe {
 
@@ -46,3 +46,52 @@ impl Pipe {
     }
 }
 
+impl Drop for Pipe {
+    fn drop(&mut self) {
+        let _ = self.close();
+    }
+}
+
+/// Use this to block a process, until another one decides to release it.
+pub struct Fence {
+    pipe: Pipe
+}
+impl Fence {
+    const RELASE_SIGNAL: u8 = 1;
+
+    pub fn new() -> Result<Self, std::io::Error> {
+        let pipe = Pipe::new()?;
+        Ok(Self { pipe })
+    }
+
+    /// Send a signal to release waiters.
+    /// NOTE: consumes the Fence
+    pub fn release_waiter(mut self) -> Result<(), std::io::Error> {
+        let signal: [u8; 1] = [Self::RELASE_SIGNAL];
+        while let Err(_) = self.pipe.write_end.write(&signal) {
+            continue;
+        }
+        self.pipe.write_end.flush()?;
+        self.pipe.close();
+        Ok(())
+    }
+    
+    /// Blocks until release signal
+    /// NOTE: consumes the Fence
+    pub fn wait_for_signal(mut self) -> Result<(), std::io::Error> {
+        let mut signal: [u8; 1] = [Self::RELASE_SIGNAL];
+        while let Err(_) = self.pipe.read_end.read(&mut signal) {
+            continue;
+        }
+        self.pipe.close();
+        Ok(())
+    }
+    
+    pub fn read_end_fd(&self) -> RawFd {
+        self.pipe.read_end.as_raw_fd()
+    }
+    pub fn write_end_fd(&self) -> RawFd {
+        self.pipe.write_end.as_raw_fd()
+    }
+
+}

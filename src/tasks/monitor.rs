@@ -18,6 +18,7 @@ use std::{
 };
 use crate::tasks::monitor_handle::MonitorHandle;
 use crate::tasks::task_status::TaskStatus;
+use crate::tasks::pipe::Fence;
 
 /// Epoll will wait forever (unless an event happens) if this timout value is provided
 const WAIT_FOREVER_TIMEOUT: isize = -1;
@@ -29,12 +30,12 @@ const WAIT_FOREVER_TIMEOUT: isize = -1;
 /// it listens on a Unix Domain Socket for commands, and quits when the process is terminated.
 ///
 /// In details, it:
-/// * creates an Unix Domain socket to listen for hypervisor commands (`handle.monitor_socket`),
+/// * creates an Unix Domain socket to listen for hypervisor commands (`handle.monitor_socket()`),
 /// * poll for 2 kind of event: the child termination or connection to the socket
 /// * when a connection happens, polls the resulting stream as well
 /// * read data from the stream and interprets it as a command.
 /// * write reponse data into the same stream.
-pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle, releaser: Fence) -> Result<(), Box<dyn std::error::Error>> {
     // TODO:
     // * write child status after its termination (into `handle.status`),
     // * notify the hypervisor when the child terminates using the `handle.monitor_socket`
@@ -77,6 +78,9 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle) -> Result<(), Box
     let mut streams = listener.incoming();
     // assume running status
     let mut process_status: TaskStatus = TaskStatus::Running;
+
+    // TODO!  move this into a "Start" command handler 
+    releaser.release_waiter()?;
     // start the event loop:
     'event_loop: while let Ok(event_count) = epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT) {
         for event_idx in 0..event_count {

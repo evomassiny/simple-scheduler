@@ -52,6 +52,7 @@ impl TaskStatus {
         }
     }
 
+    /// Saves a Json representation of `&self` into a file.
     pub fn save_to_file(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         let mut tmp = path.clone();
         tmp.set_file_name(".status-tmp");
