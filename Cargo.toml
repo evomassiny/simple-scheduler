@@ -17,6 +17,7 @@ chrono = { version = "*", features = ["serde"] }
 serde = "*" # serialization
 serde_json = "*" # serialization to json
 bincode = "*" # serialization to bytes
+async-trait = "*"
 
 [dependencies.rocket_contrib]
 git = "https://github.com/SergioBenitez/Rocket"

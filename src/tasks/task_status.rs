@@ -10,6 +10,7 @@ use serde_json;
 /// Represents all the states of a monitoree process
 #[derive(Debug,Serialize,Deserialize)]
 pub enum TaskStatus {
+    Pending,
     Stopped,
     Killed,
     Failed,
@@ -44,6 +45,7 @@ impl TaskStatus {
     /// returns either or not the process is still running.
     pub fn is_terminated(&self) -> bool {
         match *self {
+            Self::Pending => false,
             Self::Stopped => false,
             Self::Killed => true,
             Self::Failed => true,

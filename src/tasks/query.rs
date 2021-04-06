@@ -1,22 +1,78 @@
 use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::marker::Sized;
 use serde::{Serialize, Deserialize};
+use serde::de::DeserializeOwned;
+use async_trait::async_trait;
+use rocket::tokio::io::{AsyncRead,AsyncWrite,AsyncWriteExt,AsyncReadExt};
 use bincode;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+pub enum QueryReponse {
+    Ok,
+    Failure(String),
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Query {
+    Start,
     GetStatus,
     Terminate,
     Kill,
     SetHypervisorSocket(PathBuf),
 }
 
-impl Query {
+pub trait ByteSerializabe {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, String>
+        where Self: Sized;
+    fn to_bytes(&self) -> Result<Vec<u8>, String>;
+}
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        bincode::deserialize(&bytes[..]).map_err(|e| format!("cant parse query: {:?}", e))
+impl<SD: Serialize + DeserializeOwned  + Sized > ByteSerializabe for SD {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        bincode::deserialize(&bytes).map_err(|e| format!("cant parse query: {:?}", e))
     }
 
-    pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+    fn to_bytes(&self) -> Result<Vec<u8>, String> {
         bincode::serialize(&self).map_err(|e| format!("cant serialize query: {:?}", e))
     }
+}
+
+#[async_trait]
+pub trait Sendable {
+
+    fn read_from<T: Read>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>>
+        where Self: Sized;
+    fn send_to<T: Write + Read>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>>;
+}
+
+impl<B: ByteSerializabe + Sized > Sendable for B {
+
+    fn read_from<T: Read>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut data: Vec<u8> = Vec::new();
+        reader.read_to_end(&mut data)?;
+        let sendable = Self::from_bytes(&data[..])?;
+        Ok(sendable)
+    }
+
+    fn send_to<T: Write + Read>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
+        writer.write_all(&self.to_bytes()?)?;
+        Ok(())
+    }
+}
+
+impl Query {
+    pub async fn async_read_from<T: AsyncRead + Unpin>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut data: Vec<u8> = Vec::new();
+        reader.read_to_end(&mut data).await?;
+        let sendable = Self::from_bytes(&data[..])?;
+        Ok(sendable)
+    }
+
+    pub async fn async_send_to<T: AsyncWrite + Unpin>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
+        writer.write_all(&self.to_bytes()?).await?;
+        Ok(())
+    }
+
 }

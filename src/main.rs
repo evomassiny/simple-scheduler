@@ -26,7 +26,10 @@ async fn index() -> &'static str {
 #[get("/spawn")]
 async fn spawn(pool: State<'_, SqlitePool>) -> String {
     match TaskProcess::spawn("sleep 60 && echo $(date)", 1).await {
-        Ok(process) => format!("Spawned PID: {}", process.pid),
+        Ok(process) => {
+            process.handle.start().await;
+            format!("Spawned PID: {}", process.pid)
+        },
         Err(error) => format!("Failed: {:?}", error),
     }
 }

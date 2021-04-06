@@ -18,6 +18,7 @@ use std::{
 };
 use crate::tasks::monitor_handle::MonitorHandle;
 use crate::tasks::task_status::TaskStatus;
+use crate::tasks::query::{Sendable,Query};
 use crate::tasks::pipe::Fence;
 
 /// Epoll will wait forever (unless an event happens) if this timout value is provided
@@ -77,10 +78,11 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle, releaser: Fence) 
     let mut streams_by_fd: HashMap<RawFd, UnixStream> = HashMap::new();
     let mut streams = listener.incoming();
     // assume running status
-    let mut process_status: TaskStatus = TaskStatus::Running;
+    let mut process_status: TaskStatus = TaskStatus::Pending;
+    let mut releaser: Option<Fence> = Some(releaser);
 
     // TODO!  move this into a "Start" command handler 
-    releaser.release_waiter()?;
+    //releaser.release_waiter()?;
     // start the event loop:
     'event_loop: while let Ok(event_count) = epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT) {
         for event_idx in 0..event_count {
@@ -119,10 +121,19 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle, releaser: Fence) 
                         .ok_or(format!("No stream using this RawFD (unreachable)"))?;
                     // unregister the stream from the epoll
                     epoll_ctl(epoll_fd, EpollOp::EpollCtlDel, stream_fd, None)?;
-                    // read data from the stream
-                    let mut buffer = Vec::new();
-                    stream.read_to_end(&mut buffer)?;
-                    // TODO: read command, return reponce.
+                    // read queries from the stream, ignore failures
+                    if let Ok(query) = Query::read_from(&mut stream) {
+                        match query {
+                            Query::Start => {
+                                println!("Received Start Query...");
+                                if let Some(rel) = releaser.take() {
+                                    rel.release_waiter()?;
+                                    process_status = TaskStatus::Running;
+                                }
+                            },
+                            query => println!("{:?}", query)
+                        }
+                    }
                 }
             }
         }

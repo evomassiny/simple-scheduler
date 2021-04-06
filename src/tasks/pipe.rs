@@ -72,7 +72,7 @@ impl Fence {
             continue;
         }
         self.pipe.write_end.flush()?;
-        self.pipe.close();
+        let _ = self.pipe.close();
         Ok(())
     }
     
@@ -83,7 +83,7 @@ impl Fence {
         while let Err(_) = self.pipe.read_end.read(&mut signal) {
             continue;
         }
-        self.pipe.close();
+        let _ = self.pipe.close();
         Ok(())
     }
     

@@ -4,7 +4,8 @@ use std::{
     path::{Path,PathBuf},
 };
 use crate::tasks::task_status::TaskStatus;
-use crate::tasks::query::Query;
+use crate::tasks::query::{ByteSerializabe, Query};
+use rocket::tokio::net::{UnixStream};
 
 /// Name of the environment var that holds a path to the process directory
 pub const PROCESS_DIR_ENV_NAME: &str = "PROCESS_DIR";
@@ -82,6 +83,11 @@ impl MonitorHandle {
 
         self.directory = self.directory.canonicalize()?;
         Ok(())
+    }
+
+    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
+        Query::Start.async_send_to(&mut sock).await
     }
 
     pub async fn kill() -> Result<(), Box<dyn std::error::Error>> {
