@@ -70,19 +70,17 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle, releaser: Fence) 
     epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, listener_fd, Some(&mut listener_event))?;
 
     // create a empty event array, that we will feed to epoll_wait()
-    let mut events: Vec<EpollEvent> = (0..10)
+    let mut events: Vec<EpollEvent> = (0..1)
         .map(|_| EpollEvent::empty())
         .collect();
 
     // stores connection streams
     let mut streams_by_fd: HashMap<RawFd, UnixStream> = HashMap::new();
     let mut streams = listener.incoming();
-    // assume running status
+
     let mut process_status: TaskStatus = TaskStatus::Pending;
     let mut releaser: Option<Fence> = Some(releaser);
 
-    // TODO!  move this into a "Start" command handler 
-    //releaser.release_waiter()?;
     // start the event loop:
     'event_loop: while let Ok(event_count) = epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT) {
         for event_idx in 0..event_count {
@@ -140,7 +138,6 @@ pub fn monitor_process(child_pid: Pid, handle: &MonitorHandle, releaser: Fence) 
     }
     // Close all opened RawFds
     close(epoll_fd)?;
-    // close(sigchild_fd)?;
     // remove the socket file
     std::fs::remove_file(&handle.monitor_socket())?;
 

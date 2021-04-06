@@ -68,10 +68,10 @@ impl Fence {
     /// NOTE: consumes the Fence
     pub fn release_waiter(mut self) -> Result<(), std::io::Error> {
         let signal: [u8; 1] = [Self::RELASE_SIGNAL];
-        while let Err(_) = self.pipe.write_end.write(&signal) {
-            continue;
+        match self.pipe.write_end.write(&signal) {
+            Ok(_) => self.pipe.write_end.flush()?,
+            Err(e) => {}, // for some reason, the reader always close the pipe first...
         }
-        self.pipe.write_end.flush()?;
         let _ = self.pipe.close();
         Ok(())
     }
@@ -79,8 +79,9 @@ impl Fence {
     /// Blocks until release signal
     /// NOTE: consumes the Fence
     pub fn wait_for_signal(mut self) -> Result<(), std::io::Error> {
-        let mut signal: [u8; 1] = [Self::RELASE_SIGNAL];
-        while let Err(_) = self.pipe.read_end.read(&mut signal) {
+        let mut signal: Vec<u8> = Vec::new();
+        while let Err(e) = self.pipe.read_end.read_to_end(&mut signal) {
+            eprintln!("Failed to read Fence lock {:?}", e);
             continue;
         }
         let _ = self.pipe.close();
