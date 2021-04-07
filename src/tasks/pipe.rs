@@ -70,7 +70,7 @@ impl Fence {
         let signal: [u8; 1] = [Self::RELASE_SIGNAL];
         match self.pipe.write_end.write(&signal) {
             Ok(_) => self.pipe.write_end.flush()?,
-            Err(e) => {}, // for some reason, the reader always close the pipe first...
+            Err(_) => {}, // for some reason, the reader always close the pipe first...
         }
         let _ = self.pipe.close();
         Ok(())

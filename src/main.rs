@@ -16,7 +16,7 @@ use sqlx::{
 use rocket::State;
 use dotenv::dotenv;
 
-use tasks::TaskProcess;
+use tasks::{TaskProcess, Sendable, TaskStatus};
 
 #[get("/")]
 async fn index() -> &'static str {
@@ -28,6 +28,9 @@ async fn spawn(pool: State<'_, SqlitePool>) -> String {
     match TaskProcess::spawn("sleep 10 && echo $(date)", 1).await {
         Ok(process) => {
             process.handle.start().await;
+
+            //let status = process.handle.get_status().await.unwrap();
+            //format!("Spawned PID: {}, {:?}", process.pid, status)
             format!("Spawned PID: {}", process.pid)
         },
         Err(error) => format!("Failed: {:?}", error),

@@ -137,7 +137,7 @@ impl TaskProcess {
                                     // wait for child completion, and listen for request
                                     let mut monitor = Monitor {
                                         start_fence: Some(fence),
-                                        monitoree: child,
+                                        task: child,
                                         status: TaskStatus::Pending,
                                         handle: handle,
                                     };

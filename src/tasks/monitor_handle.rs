@@ -35,11 +35,10 @@ impl MonitorHandle {
     /// Create an Handle from a task ID. 
     /// (creates the task directory)
     pub fn from_task_id(task_id: i32) -> Self {
-        // create temporary file for stdout
         // fetch $PROCESS_DIR_ENV variable
         let processes_dir: String = env::var(PROCESS_DIR_ENV_NAME)
             .unwrap_or_else(|_| env::temp_dir().to_string_lossy().to_string());
-        // create process directory
+        // build process directory path
         let output_dir = Path::new(&processes_dir)
             .join(format!("{}{}", &PROCESS_OUTPUT_DIR_PREFIX, task_id));
         Self {
@@ -68,7 +67,7 @@ impl MonitorHandle {
         self.directory.join(&IPC_SOCKET)
     }
 
-    /// the directory into which the monitoree process started
+    /// the directory into which the task process started
     pub fn working_directory(&self) -> PathBuf {
         self.directory.join(&PROCESS_CWD_DIR_NAME)
     }
@@ -100,7 +99,9 @@ impl MonitorHandle {
         Query::Terminate.async_send_to(&mut sock).await
     }
 
-    pub async fn get_status() -> Result<TaskStatus, Box<dyn std::error::Error>> {
-        todo!()
+    pub async fn get_status(&self) -> Result<TaskStatus, Box<dyn std::error::Error>> {
+        let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
+        Query::GetStatus.async_send_to(&mut sock).await?;
+        TaskStatus::async_read_from(&mut sock).await
     }
 }

@@ -3,7 +3,7 @@ use nix::{
     sys::{
         epoll::{epoll_create, epoll_ctl, epoll_wait, EpollOp, EpollEvent, EpollFlags},
         signalfd::{SignalFd, SfdFlags},
-        signal::{Signal, SigSet},
+        signal::{kill, Signal, SigSet},
     },
 };
 use std::{
@@ -27,15 +27,15 @@ const WAIT_FOREVER_TIMEOUT: isize = -1;
 
 pub struct Monitor {
     pub start_fence: Option<Fence>,
-    pub monitoree: Pid,
+    pub task: Pid,
     pub status: TaskStatus,
     pub handle: MonitorHandle,
 }
 
 impl Monitor {
 
-    fn start(&mut self) -> Result<(), Box<dyn std::error::Error>>  {
-        println!("Starting task...");
+    /// start task process (release blocking Fence).
+    fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(rel) = self.start_fence.take() {
             rel.release_waiter()?;
             self.status = TaskStatus::Running;
@@ -43,9 +43,28 @@ impl Monitor {
         Ok(())
     }
 
-    fn process_query(&mut self, query: Query) -> Result<(), Box<dyn std::error::Error>> {
+    /// Send SIGKILL signal to task process
+    fn kill(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        kill(self.task, Some(Signal::SIGKILL)).map_err(|e| format!("Can't kill task: {:?}", e).into())
+    }
+
+    /// Send SIGTERM signal to task process
+    fn terminate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        kill(self.task, Some(Signal::SIGTERM)).map_err(|e| format!("Can't terminate task: {:?}", e).into())
+    }
+
+    /// Send `self.status` into stream (blocking).
+    fn send_status(&self, stream: &mut UnixStream) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Sending status");
+        self.status.send_to(stream)
+    }
+
+    fn process_query(&mut self, query: Query, stream: &mut UnixStream) -> Result<(), Box<dyn std::error::Error>> {
         match query {
             Query::Start => self.start()?,
+            Query::Kill => self.kill()?,
+            Query::Terminate => self.terminate()?,
+            Query::GetStatus => self.send_status(stream)?,
             query => println!("{:?}", query)
         }
         Ok(())
@@ -102,7 +121,7 @@ impl Monitor {
                 // fetch the data we've associated with the event (file descriptors)
                 let fd: RawFd = events[event_idx].data().try_into()?;
                 match fd {
-                    // the monitoree has terminated
+                    // the task has terminated
                     fd if fd == sigchild_fd => {
                         self.status = match sigchild_reader.read_signal() {
                             Ok(Some(siginfo)) => TaskStatus::from_siginfo(&siginfo)
@@ -136,7 +155,7 @@ impl Monitor {
                         epoll_ctl(epoll_fd, EpollOp::EpollCtlDel, stream_fd, None)?;
                         // read queries from the stream, ignore failures
                         if let Ok(query) = Query::read_from(&mut stream) {
-                            self.process_query(query)?;
+                            self.process_query(query, &mut stream)?;
                         }
                     }
                 }

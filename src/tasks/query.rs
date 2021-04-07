@@ -10,9 +10,9 @@ use bincode;
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Query {
     Start,
-    GetStatus,
-    Terminate,
     Kill,
+    Terminate,
+    GetStatus,
     SetHypervisorSocket(PathBuf),
 }
 
@@ -32,7 +32,6 @@ impl<SD: Serialize + DeserializeOwned  + Sized > ByteSerializabe for SD {
     }
 }
 
-#[async_trait]
 pub trait Sendable {
 
     fn read_from<T: Read>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>>

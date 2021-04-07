@@ -5,6 +5,8 @@ use nix::{
 };
 use serde::{Serialize, Deserialize};
 use serde_json;
+use rocket::tokio::io::{AsyncRead,AsyncWrite,AsyncWriteExt,AsyncReadExt};
+use crate::tasks::query::ByteSerializabe;
 
 
 /// Represents all the states of a monitoree process
@@ -65,4 +67,19 @@ impl TaskStatus {
             .map_err(|e| format!("Could not create {:?}, {:?}", path, e))?;
         Ok(())
     }
+
+    /// Reads one Query from an AsyncRead instance.
+    pub async fn async_read_from<T: AsyncRead + Unpin>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut data: Vec<u8> = Vec::new();
+        reader.read_to_end(&mut data).await?;
+        let sendable = Self::from_bytes(&data[..])?;
+        Ok(sendable)
+    }
+
+    /// Sends one Query to an AsyncWrite instance.
+    pub async fn async_send_to<T: AsyncWrite + Unpin>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
+        writer.write_all(&self.to_bytes()?).await?;
+        Ok(())
+    }
+
 }
