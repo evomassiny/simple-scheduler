@@ -34,15 +34,18 @@ pub struct Monitor {
 
 impl Monitor {
 
+    fn start(&mut self) -> Result<(), Box<dyn std::error::Error>>  {
+        println!("Starting task...");
+        if let Some(rel) = self.start_fence.take() {
+            rel.release_waiter()?;
+            self.status = TaskStatus::Running;
+        }
+        Ok(())
+    }
+
     fn process_query(&mut self, query: Query) -> Result<(), Box<dyn std::error::Error>> {
         match query {
-            Query::Start => {
-                println!("Received Start Query...");
-                if let Some(rel) = self.start_fence.take() {
-                    rel.release_waiter()?;
-                    self.status = TaskStatus::Running;
-                }
-            },
+            Query::Start => self.start()?,
             query => println!("{:?}", query)
         }
         Ok(())
@@ -86,7 +89,7 @@ impl Monitor {
         epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, listener_fd, Some(&mut listener_event))?;
 
         // create a empty event array, that we will feed to epoll_wait()
-        let mut events: Vec<EpollEvent> = (0..1)
+        let mut events: Vec<EpollEvent> = (0..2)
             .map(|_| EpollEvent::empty())
             .collect();
 
