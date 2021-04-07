@@ -90,14 +90,14 @@ impl MonitorHandle {
         Query::Start.async_send_to(&mut sock).await
     }
 
-    pub async fn kill() -> Result<(), Box<dyn std::error::Error>> {
-        let query: Vec<u8> = Query::Kill.to_bytes()?;
-        todo!()
+    pub async fn kill(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
+        Query::Kill.async_send_to(&mut sock).await
     }
 
-    pub async fn terminate() -> Result<(), Box<dyn std::error::Error>> {
-        let query: Vec<u8> = Query::Terminate.to_bytes()?;
-        todo!()
+    pub async fn terminate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
+        Query::Terminate.async_send_to(&mut sock).await
     }
 
     pub async fn get_status() -> Result<TaskStatus, Box<dyn std::error::Error>> {

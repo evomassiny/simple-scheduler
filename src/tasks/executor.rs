@@ -10,7 +10,8 @@ use std::{
 };
 
 use crate::tasks::TaskProcess;
-use crate::tasks::monitor::monitor_process;
+use crate::tasks::task_status::TaskStatus;
+use crate::tasks::monitor::Monitor;
 use crate::tasks::monitor_handle::MonitorHandle;
 use crate::tasks::pipe::{Pipe,Fence};
 use crate::tasks::utils::{
@@ -134,7 +135,15 @@ impl TaskProcess {
                                     pipe.close().expect("Could not close pipe");
 
                                     // wait for child completion, and listen for request
-                                    if let Err(e) = monitor_process(child, &handle, fence) {
+                                    let mut monitor = Monitor {
+                                        start_fence: Some(fence),
+                                        monitoree: child,
+                                        status: TaskStatus::Pending,
+                                        handle: handle,
+                                    };
+
+                                    //if let Err(e) = monitor_process(child, &handle, fence) {
+                                    if let Err(e) = monitor.run() {
                                         eprintln!("Monitor: '{}' failed with '{:?}'", &monitor_name, e);
                                         panic!("Process monitoring Failed");
                                     }

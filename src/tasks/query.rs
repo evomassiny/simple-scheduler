@@ -8,13 +8,6 @@ use rocket::tokio::io::{AsyncRead,AsyncWrite,AsyncWriteExt,AsyncReadExt};
 use bincode;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum QueryReponse {
-    Ok,
-    Failure(String),
-}
-
-
-#[derive(Debug, Serialize, Deserialize)]
 pub enum Query {
     Start,
     GetStatus,
@@ -49,6 +42,7 @@ pub trait Sendable {
 
 impl<B: ByteSerializabe + Sized > Sendable for B {
 
+    /// Reads one Query from a Reader
     fn read_from<T: Read>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
         let mut data: Vec<u8> = Vec::new();
         reader.read_to_end(&mut data)?;
@@ -56,6 +50,7 @@ impl<B: ByteSerializabe + Sized > Sendable for B {
         Ok(sendable)
     }
 
+    /// Send one Query into a Writer
     fn send_to<T: Write + Read>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
         writer.write_all(&self.to_bytes()?)?;
         Ok(())
@@ -63,6 +58,8 @@ impl<B: ByteSerializabe + Sized > Sendable for B {
 }
 
 impl Query {
+
+    /// Reads one Query from an AsyncRead instance.
     pub async fn async_read_from<T: AsyncRead + Unpin>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
         let mut data: Vec<u8> = Vec::new();
         reader.read_to_end(&mut data).await?;
@@ -70,6 +67,7 @@ impl Query {
         Ok(sendable)
     }
 
+    /// Sends one Query to an AsyncWrite instance.
     pub async fn async_send_to<T: AsyncWrite + Unpin>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
         writer.write_all(&self.to_bytes()?).await?;
         Ok(())
