@@ -31,17 +31,17 @@ use std::{
  * it cannot be implemented safely.
  */ 
 /// similar to C's argv main() argument
-static mut ARGV: *const *const u8 = PT_NULL as *const *const u8;
+static mut ARGV: Option<*const *const u8> = None;
 /// similar to C's argc main() argument
-static mut ARGC: c_int = 0;
+static mut ARGC: Option<isize> = None;
 
 /// This function's only purpose is to store the values of `argc` and `argv`.
-/// SAFETY: This function mutates static variables, so it is inherently to be unsafe,
-/// but, because this function is only executed once (at startup), this should be safe.
-extern "C" fn set_args(argc: c_int, argv: *const *const u8, _envp: *const *const u8) {
+extern "C" fn init_args(argc: c_int, argv: *const *const u8, _envp: *const *const u8) {
+    // SAFETY: This function is executed only once at start-up, _before_ `main()`
+    // `argc` and `argv` are garantied to live as long as the program.
     unsafe {
-        ARGC = argc;
-        ARGV = argv;
+        ARGC = Some(argc as isize);
+        ARGV = Some(argv);
     }
 }
 
@@ -50,20 +50,19 @@ extern "C" fn set_args(argc: c_int, argv: *const *const u8, _envp: *const *const
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 #[used]
 #[link_section = ".init_array.00098"]
-static ARGV_SETTER: extern "C" fn(c_int, *const *const u8, *const *const u8) = set_args;
+static ARGV_SETTER: extern "C" fn(c_int, *const *const u8, *const *const u8) = init_args;
 
 /// This function renames the caller process to `name`.
 /// To do so it:
 /// * call prctl() to change the name in /proc/${pid}/status
 /// * directly write into `argv[0]` (change /proc/$[pid}/cmdline)
 ///
-/// SAFETY: This uses a lot of C API, and raw pointer dereferencing, 
-/// it cannot be implemented safely.
 pub fn rename_current_process(name: &str) -> Result<(), ()> {
     let new_name = String::from(name);
     let name_as_c_string = CString::new(new_name.clone()).map_err(|_| ())?;
+    // 1 - call prctl syscall to set the new name,
+    // SAFETY: safe but rust does't know it (ffi)
     unsafe {
-        // 1 - call prctl syscall to set the new name,
         prctl(
             PR_SET_NAME,
             name_as_c_string.as_ptr() as c_ulong,
@@ -71,13 +70,19 @@ pub fn rename_current_process(name: &str) -> Result<(), ()> {
             PT_NULL,
             PT_NULL,
         );
-        // 2 - overwrite ARGV[0]
-        if ARGV != (PT_NULL as *const *const u8) {
-            // first get the old process name to retreive its length
-            let old_len = strlen(*ARGV as *mut c_char);
-            let new_len = std::cmp::min(old_len, new_name.len());
-            memset(*ARGV as *mut c_void, '\0' as i32, old_len); // clear original string
-            strncpy(*ARGV as *mut c_char, name_as_c_string.as_ptr(), new_len); // override with new content
+    }
+    // 2 - overwrite ARGV[0]
+    // SAFETY: mutate **argv, it is safe as long as we don't write
+    // more chars than strlen(**argv)
+    unsafe {
+        if let Some(argv) = ARGV {
+            if argv != (PT_NULL as *const *const u8) && *argv != (PT_NULL as *const u8) {
+                // first get the old process name to retreive its length
+                let old_len = strlen(*argv as *mut c_char);
+                let new_len = std::cmp::min(old_len, new_name.len());
+                memset(*argv as *mut c_void, '\0' as i32, old_len); // clear original string
+                strncpy(*argv as *mut c_char, name_as_c_string.as_ptr(), new_len); // override with new content
+            }
         }
     }
     Ok(())
