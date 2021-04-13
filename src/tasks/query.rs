@@ -64,10 +64,12 @@ impl<B: ByteSerializabe + Sized > Sendable for B {
 
     /// Send one Query into a Writer
     fn send_to<T: Write + Read>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
-        let bytes: Vec<u8> = self.to_bytes()?;
-        let size: [u8; std::mem::size_of::<usize>()] = bytes.len().to_be_bytes();
-        writer.write_all(&size)?; // write content len
-        writer.write_all(&bytes)?; // write content
+        let mut bytes: Vec<u8> = self.to_bytes()?;
+        let mut msg: Vec<u8> = Vec::new();
+        msg.extend_from_slice(&bytes.len().to_be_bytes());
+        msg.append(&mut bytes);
+        writer.write_all(&msg)?;
+        writer.flush()?;
         Ok(())
     }
 }
@@ -97,12 +99,12 @@ impl Query {
 
     /// Sends one Query to an AsyncWrite instance.
     pub async fn async_send_to<T: AsyncWrite + Unpin>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
-        const USIZE_SIZE: usize = std::mem::size_of::<usize>();
         let mut bytes: Vec<u8> = self.to_bytes()?;
         let mut msg: Vec<u8> = Vec::new();
         msg.extend_from_slice(&bytes.len().to_be_bytes());
         msg.append(&mut bytes);
         writer.write_all(&msg).await?;
+        writer.flush().await?;
         Ok(())
     }
 

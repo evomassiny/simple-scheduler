@@ -92,12 +92,12 @@ impl TaskStatus {
 
     /// Sends one TaskStatus to an AsyncWrite instance.
     pub async fn async_send_to<T: AsyncWrite + Unpin>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
-        const USIZE_SIZE: usize = std::mem::size_of::<usize>();
         let mut bytes: Vec<u8> = self.to_bytes()?;
         let mut msg: Vec<u8> = Vec::new();
         msg.extend_from_slice(&bytes.len().to_be_bytes());
         msg.append(&mut bytes);
         writer.write_all(&msg).await?;
+        writer.flush().await;
         Ok(())
     }
 
