@@ -119,7 +119,7 @@ impl TaskProcess {
                                     reset_signal_handlers().expect("failed to reset signals");
                                     // Close pipe, at this point only stderr/stdout file should be open
                                     pipe.close().expect("Could not close pipe");
-                                    fence.wait_for_signal().expect("Waitinf for 'GO/NO GO' failed.");
+                                    fence.wait_for_signal().expect("Waiting for 'GO/NO GO' failed.");
                                     let _ = execv(&args[0], &args);
                                     unreachable!();
                                 }

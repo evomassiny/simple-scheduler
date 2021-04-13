@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::convert::TryInto;
 use nix::{
     libc,
     sys::signalfd::siginfo,
@@ -68,17 +69,35 @@ impl TaskStatus {
         Ok(())
     }
 
-    /// Reads one Query from an AsyncRead instance.
+    /// Reads one TaskStatus from an AsyncRead instance.
     pub async fn async_read_from<T: AsyncRead + Unpin>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut data: Vec<u8> = Vec::new();
-        reader.read_to_end(&mut data).await?;
-        let sendable = Self::from_bytes(&data[..])?;
+        const USIZE_SIZE: usize = std::mem::size_of::<usize>();
+        let mut size_buf: [u8; USIZE_SIZE] = [0; USIZE_SIZE];
+
+        // first read the content size
+        let mut handle = reader.take(USIZE_SIZE.try_into()?);
+        handle.read_exact(&mut size_buf).await?;
+        let content_len: usize = usize::from_be_bytes(size_buf);
+
+        // then read the content itself
+        let mut data: Vec<u8> = Vec::with_capacity(content_len);
+        // SAFETY: safe because we only read its content 
+        // if it has been overwritten by read_exact()
+        unsafe { data.set_len(content_len); }
+        handle = reader.take(content_len.try_into()?);
+        handle.read_exact(&mut data).await?;
+        let sendable = Self::from_bytes(&data)?;
         Ok(sendable)
     }
 
-    /// Sends one Query to an AsyncWrite instance.
+    /// Sends one TaskStatus to an AsyncWrite instance.
     pub async fn async_send_to<T: AsyncWrite + Unpin>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
-        writer.write_all(&self.to_bytes()?).await?;
+        const USIZE_SIZE: usize = std::mem::size_of::<usize>();
+        let mut bytes: Vec<u8> = self.to_bytes()?;
+        let mut msg: Vec<u8> = Vec::new();
+        msg.extend_from_slice(&bytes.len().to_be_bytes());
+        msg.append(&mut bytes);
+        writer.write_all(&msg).await?;
         Ok(())
     }
 

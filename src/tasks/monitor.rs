@@ -56,7 +56,9 @@ impl Monitor {
     /// Send `self.status` into stream (blocking).
     fn send_status(&self, stream: &mut UnixStream) -> Result<(), Box<dyn std::error::Error>> {
         println!("Sending status");
-        self.status.send_to(stream)
+        let _ = self.status.send_to(stream)?;
+        stream.shutdown(std::net::Shutdown::Write)?;
+        Ok(())
     }
 
     fn process_query(&mut self, query: Query, stream: &mut UnixStream) -> Result<(), Box<dyn std::error::Error>> {
@@ -108,7 +110,7 @@ impl Monitor {
         epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, listener_fd, Some(&mut listener_event))?;
 
         // create a empty event array, that we will feed to epoll_wait()
-        let mut events: Vec<EpollEvent> = (0..2)
+        let mut events: Vec<EpollEvent> = (0..5)
             .map(|_| EpollEvent::empty())
             .collect();
 
@@ -154,8 +156,12 @@ impl Monitor {
                         // unregister the stream from the epoll
                         epoll_ctl(epoll_fd, EpollOp::EpollCtlDel, stream_fd, None)?;
                         // read queries from the stream, ignore failures
-                        if let Ok(query) = Query::read_from(&mut stream) {
-                            self.process_query(query, &mut stream)?;
+                        match Query::read_from(&mut stream) {
+                            Ok(query) => {
+                                dbg!(&query);
+                                self.process_query(query, &mut stream)?;
+                            },
+                            Err(e) => eprintln!("bad query: {:?}", e),
                         }
                     }
                 }

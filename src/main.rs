@@ -29,9 +29,9 @@ async fn spawn(pool: State<'_, SqlitePool>) -> String {
         Ok(process) => {
             process.handle.start().await;
 
-            //let status = process.handle.get_status().await.unwrap();
-            //format!("Spawned PID: {}, {:?}", process.pid, status)
-            format!("Spawned PID: {}", process.pid)
+            let status = process.handle.get_status().await.unwrap();
+            format!("Spawned PID: {}, {:?}", process.pid, status)
+            //format!("Spawned PID: {}", process.pid)
         },
         Err(error) => format!("Failed: {:?}", error),
     }

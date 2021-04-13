@@ -6,7 +6,7 @@ use nix::{
     },
 };
 use std::{
-    fs::File,
+    fs::{File, OpenOptions},
     os::unix::io::{RawFd, IntoRawFd},
     ffi::CString,
     path::Path,
@@ -112,7 +112,9 @@ pub fn reset_signal_handlers() -> Result<(), String> {
 /// use `dup2()` to open a file and assign it to a given File descriptor
 /// (even if it already exists)
 pub fn assign_file_to_fd(file_path: &Path, fd: RawFd) -> Result<(), String> {
-    let file = File::create(file_path)
+    let file = OpenOptions::new()
+        .append(true)
+        .open(file_path)
         .map_err(|_| format!("could not open '{}'", file_path.display()))?;
     let _ = dup2(file.into_raw_fd(), fd)
         .map_err(|_| "Failed to redirect stderr".to_string())?;
