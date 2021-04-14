@@ -30,6 +30,7 @@ pub struct Monitor {
     pub task: Pid,
     pub status: TaskStatus,
     pub handle: MonitorHandle,
+    pub hypervisor_socket: Option<PathBuf>,
 }
 
 impl Monitor {
@@ -67,7 +68,17 @@ impl Monitor {
             Query::Kill => self.kill()?,
             Query::Terminate => self.terminate()?,
             Query::GetStatus => self.send_status(stream)?,
+            Query::SetHypervisorSocket(sock) => self.hypervisor_socket = sock,
             query => println!("{:?}", query)
+        }
+        Ok(())
+    }
+
+    fn notify_hypervisor(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(ref hypervisor_socket) = self.hypervisor_socket {
+            let mut stream = UnixStream::connect(hypervisor_socket)?;
+            let _ = self.status.send_to(&mut stream)?;
+            stream.shutdown(std::net::Shutdown::Write)?;
         }
         Ok(())
     }
@@ -131,7 +142,6 @@ impl Monitor {
                             _ => TaskStatus::Failed,  // assume failure, if nothing is returned
                         };
                         if self.status.is_terminated() {
-                            self.status.save_to_file(&self.handle.status_file())?;
                             break 'event_loop;
                         }
                     },
@@ -169,6 +179,11 @@ impl Monitor {
         }
         // Close all opened RawFds
         close(epoll_fd)?;
+        // write status to file
+        self.status.save_to_file(&self.handle.status_file())?;
+        if let Err(error) = self.notify_hypervisor() {
+            eprintln!("Failed to send status to hypervisor through socket: '{:?}': '{:?}'", self.hypervisor_socket, error);
+        }
         // remove the socket file
         std::fs::remove_file(&self.handle.monitor_socket())?;
 

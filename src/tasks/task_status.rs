@@ -97,7 +97,7 @@ impl TaskStatus {
         msg.extend_from_slice(&bytes.len().to_be_bytes());
         msg.append(&mut bytes);
         writer.write_all(&msg).await?;
-        writer.flush().await;
+        writer.flush().await?;
         Ok(())
     }
 

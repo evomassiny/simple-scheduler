@@ -140,6 +140,7 @@ impl TaskProcess {
                                         task: child,
                                         status: TaskStatus::Pending,
                                         handle: handle,
+                                        hypervisor_socket: None,
                                     };
 
                                     //if let Err(e) = monitor_process(child, &handle, fence) {

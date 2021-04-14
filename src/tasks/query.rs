@@ -14,7 +14,7 @@ pub enum Query {
     Kill,
     Terminate,
     GetStatus,
-    SetHypervisorSocket(PathBuf),
+    SetHypervisorSocket(Option<PathBuf>),
 }
 
 pub trait ByteSerializabe {
@@ -53,8 +53,8 @@ impl<B: ByteSerializabe + Sized > Sendable for B {
         dbg!(&content_len);
 
         let mut data: Vec<u8> = Vec::with_capacity(content_len);
-        /// SAFETY: safe because we only read its content 
-        /// if it has been overwritten by read_exact()
+        // SAFETY: safe because we only read its content 
+        // if it has been overwritten by read_exact()
         unsafe { data.set_len(content_len); }
         handle = reader.take(content_len.try_into()?);
         handle.read_exact(&mut data)?;
@@ -78,11 +78,11 @@ impl Query {
 
     /// Reads one Query from an AsyncRead instance.
     pub async fn async_read_from<T: AsyncRead + Unpin>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
-        const USIZE_SIZE: usize = std::mem::size_of::<usize>();
-        let mut size_buf: [u8; USIZE_SIZE] = [0; USIZE_SIZE];
+        use std::mem::size_of;
+        let mut size_buf: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
 
         // first read the content size
-        let mut handle = reader.take(USIZE_SIZE.try_into()?);
+        let mut handle = reader.take(size_of::<usize>().try_into()?);
         handle.read_exact(&mut size_buf).await?;
         let content_len: usize = usize::from_be_bytes(size_buf);
 
