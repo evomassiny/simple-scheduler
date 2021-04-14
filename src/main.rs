@@ -49,7 +49,7 @@ async fn main() {
         .connect(&url)
         .await
         .expect("Could not connect to database.");
-    let result = rocket::ignite()
+    let result = rocket::build()
         .manage(pool)
         .mount("/", routes![index, spawn])
         .launch().await;
