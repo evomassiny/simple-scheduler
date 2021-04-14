@@ -6,7 +6,10 @@ use nix::{
 };
 use serde::{Serialize, Deserialize};
 use serde_json;
-use rocket::tokio::io::{AsyncRead,AsyncWrite,AsyncWriteExt,AsyncReadExt};
+use rocket::tokio::{
+    io::{AsyncRead,AsyncWrite,AsyncWriteExt,AsyncReadExt},
+    fs::File,
+};
 use crate::tasks::query::ByteSerializabe;
 
 
@@ -69,6 +72,16 @@ impl TaskStatus {
         Ok(())
     }
 
+    /// Read status from a JSON file
+    pub async fn async_from_file(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        // read status file
+        let mut file = File::open(path).await?;
+        let mut data: Vec<u8> = vec![];
+        file.read_to_end(&mut data).await?;
+        let status: Self = serde_json::from_slice(&data)?;
+        Ok(status)
+    }
+
     /// Reads one TaskStatus from an AsyncRead instance.
     pub async fn async_read_from<T: AsyncRead + Unpin>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
         const USIZE_SIZE: usize = std::mem::size_of::<usize>();
@@ -86,8 +99,8 @@ impl TaskStatus {
         unsafe { data.set_len(content_len); }
         handle = reader.take(content_len.try_into()?);
         handle.read_exact(&mut data).await?;
-        let sendable = Self::from_bytes(&data)?;
-        Ok(sendable)
+        let status = Self::from_bytes(&data)?;
+        Ok(status)
     }
 
     /// Sends one TaskStatus to an AsyncWrite instance.

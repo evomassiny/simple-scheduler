@@ -8,7 +8,6 @@ mod query;
 
 pub use crate::tasks::monitor_handle::MonitorHandle;
 pub use crate::tasks::task_status::TaskStatus;
-pub use crate::tasks::query::Sendable;
 
 #[derive(Debug)]
 pub struct TaskProcess {

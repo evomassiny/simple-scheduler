@@ -5,7 +5,10 @@ use std::{
 };
 use crate::tasks::task_status::TaskStatus;
 use crate::tasks::query::{ByteSerializabe, Query};
-use rocket::tokio::net::{UnixStream};
+use rocket::tokio::{
+    net::{UnixStream},
+    fs::{metadata},
+};
 
 /// Name of the environment var that holds a path to the process directory
 pub const PROCESS_DIR_ENV_NAME: &str = "PROCESS_DIR";
@@ -84,22 +87,30 @@ impl MonitorHandle {
         Ok(())
     }
 
+    /// start the task
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
         Query::Start.async_send_to(&mut sock).await
     }
 
+    /// kill the task
     pub async fn kill(&self) -> Result<(), Box<dyn std::error::Error>> {
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
         Query::Kill.async_send_to(&mut sock).await
     }
 
+    /// ask the task to terminate
     pub async fn terminate(&self) -> Result<(), Box<dyn std::error::Error>> {
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
         Query::Terminate.async_send_to(&mut sock).await
     }
 
+    /// return the status of the task
     pub async fn get_status(&self) -> Result<TaskStatus, Box<dyn std::error::Error>> {
+        // check if status file exists
+        if let Ok(md) = metadata(self.status_file()).await {
+            return TaskStatus::async_from_file(&self.status_file()).await;
+        }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
         Query::GetStatus.async_send_to(&mut sock).await?;
         TaskStatus::async_read_from(&mut sock).await
