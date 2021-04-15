@@ -1,7 +1,6 @@
 //#![feature(proc_macro_hygiene, decl_macro)]
 #[macro_use]
 extern crate rocket;
-#[macro_use]
 extern crate rocket_contrib;
 extern crate chrono;
 extern crate dotenv;
@@ -16,7 +15,7 @@ use dotenv::dotenv;
 use rocket::State;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
-use tasks::{TaskProcess, TaskStatus};
+use tasks::TaskProcess;
 
 #[get("/")]
 async fn index() -> &'static str {
@@ -24,10 +23,10 @@ async fn index() -> &'static str {
 }
 
 #[get("/spawn")]
-async fn spawn(pool: State<'_, SqlitePool>) -> String {
+async fn spawn(_pool: State<'_, SqlitePool>) -> String {
     match TaskProcess::spawn("sleep 10 && echo $(date)", 1).await {
         Ok(process) => {
-            process.handle.start().await;
+            let _ = process.handle.start().await;
             let status = process.handle.get_status().await.unwrap();
             format!("Spawned PID: {}, {:?}", process.pid, status)
         }

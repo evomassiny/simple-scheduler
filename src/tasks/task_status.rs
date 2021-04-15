@@ -5,9 +5,8 @@ use rocket::tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
 };
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::convert::TryInto;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Represents all the states of a monitoree process
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,9 +57,8 @@ impl TaskStatus {
     }
 
     /// Saves a Json representation of `&self` into a file.
-    pub fn save_to_file(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-        let mut tmp = path.clone();
-        tmp.set_file_name(".status-tmp");
+    pub fn save_to_file(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = path.with_file_name(".status-tmp");
         std::fs::write(&tmp, serde_json::to_string(self)?)
             .map_err(|e| format!("Could not write {:?}, {:?}", &tmp, e))?;
         // rename is atomic if both paths are in the same mount point.
@@ -69,7 +67,7 @@ impl TaskStatus {
     }
 
     /// Read status from a JSON file
-    pub async fn async_from_file(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn async_from_file(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         // read status file
         let mut file = File::open(path).await?;
         let mut data: Vec<u8> = vec![];

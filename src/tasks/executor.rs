@@ -135,7 +135,7 @@ impl TaskProcess {
                                         start_fence: Some(fence),
                                         task: child,
                                         status: TaskStatus::Pending,
-                                        handle: handle,
+                                        handle,
                                         hypervisor_socket: None,
                                     };
 
@@ -170,7 +170,7 @@ impl TaskProcess {
                     Ok(TaskProcess {
                         id: 0,
                         pid: grandchild,
-                        handle: handle,
+                        handle,
                     })
                 }
             }

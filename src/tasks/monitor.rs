@@ -13,7 +13,6 @@ use nix::{
 use std::{
     collections::HashMap,
     convert::TryInto,
-    io::Read,
     os::unix::{
         io::{AsRawFd, RawFd},
         net::{UnixListener, UnixStream},
@@ -73,7 +72,6 @@ impl Monitor {
             Query::Terminate => self.terminate()?,
             Query::GetStatus => self.send_status(stream)?,
             Query::SetHypervisorSocket(sock) => self.hypervisor_socket = sock,
-            query => println!("{:?}", query),
         }
         Ok(())
     }
@@ -149,9 +147,9 @@ impl Monitor {
         'event_loop: while let Ok(event_count) =
             epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT)
         {
-            for event_idx in 0..event_count {
+            for event in events.iter().take(event_count) {
                 // fetch the data we've associated with the event (file descriptors)
-                let fd: RawFd = events[event_idx].data().try_into()?;
+                let fd: RawFd = event.data().try_into()?;
                 match fd {
                     // the task has terminated
                     fd if fd == sigchild_fd => {
@@ -170,7 +168,7 @@ impl Monitor {
                         // won't block (epolled)
                         let stream = streams
                             .next()
-                            .ok_or(format!("No stream available (unreachable)"))??;
+                            .ok_or_else(|| "No stream available (unreachable)".to_string())??;
                         // register the stream to the epoll_fd
                         let stream_fd: RawFd = stream.as_raw_fd();
                         let mut event = EpollEvent::new(EpollFlags::EPOLLIN, stream_fd.try_into()?);
@@ -183,7 +181,7 @@ impl Monitor {
                         // fetch the stream for the fd, and process the request
                         let mut stream = streams_by_fd
                             .remove(&stream_fd)
-                            .ok_or(format!("No stream using this RawFD (unreachable)"))?;
+                            .ok_or_else(|| "No stream using this RawFD (unreachable)".to_string())?;
                         // unregister the stream from the epoll
                         epoll_ctl(epoll_fd, EpollOp::EpollCtlDel, stream_fd, None)?;
                         // read queries from the stream, ignore failures

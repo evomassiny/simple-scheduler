@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use bincode;
 use rocket::tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -48,7 +47,7 @@ impl<B: ByteSerializabe + Sized> Sendable for B {
         let mut size_buf: [u8; USIZE_SIZE] = [0; USIZE_SIZE];
 
         let mut handle = reader.take(USIZE_SIZE.try_into()?);
-        handle.read(&mut size_buf)?;
+        handle.read_exact(&mut size_buf)?;
         let content_len: usize = usize::from_be_bytes(size_buf);
         dbg!(&content_len);
 

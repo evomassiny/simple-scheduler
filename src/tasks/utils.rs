@@ -5,7 +5,7 @@ use nix::{
 };
 use std::{
     ffi::CString,
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     os::unix::io::{IntoRawFd, RawFd},
     path::Path,
 };

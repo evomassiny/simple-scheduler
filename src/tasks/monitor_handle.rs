@@ -1,4 +1,4 @@
-use crate::tasks::query::{ByteSerializabe, Query};
+use crate::tasks::query::Query;
 use crate::tasks::task_status::TaskStatus;
 use rocket::tokio::{fs::metadata, net::UnixStream};
 use std::{
@@ -39,7 +39,7 @@ impl MonitorHandle {
         let output_dir =
             Path::new(&processes_dir).join(format!("{}{}", &PROCESS_OUTPUT_DIR_PREFIX, task_id));
         Self {
-            directory: output_dir.to_path_buf(),
+            directory: output_dir,
         }
     }
 
@@ -111,7 +111,7 @@ impl MonitorHandle {
     /// return the status of the task
     pub async fn get_status(&self) -> Result<TaskStatus, Box<dyn std::error::Error>> {
         // check if status file exists
-        if let Ok(md) = metadata(self.status_file()).await {
+        if let Ok(_md) = metadata(self.status_file()).await {
             return TaskStatus::async_from_file(&self.status_file()).await;
         }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
