@@ -1,13 +1,9 @@
-use std::{
-    env,
-    fs,
-    path::{Path,PathBuf},
-};
-use crate::tasks::task_status::TaskStatus;
 use crate::tasks::query::{ByteSerializabe, Query};
-use rocket::tokio::{
-    net::{UnixStream},
-    fs::{metadata},
+use crate::tasks::task_status::TaskStatus;
+use rocket::tokio::{fs::metadata, net::UnixStream};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
 };
 
 /// Name of the environment var that holds a path to the process directory
@@ -25,7 +21,6 @@ pub const IPC_SOCKET: &str = "monitor.sock";
 /// CWD directory name
 pub const PROCESS_CWD_DIR_NAME: &str = "cwd";
 
-
 /// holds path related to a monitor process
 #[derive(Debug)]
 pub struct MonitorHandle {
@@ -34,16 +29,15 @@ pub struct MonitorHandle {
 }
 
 impl MonitorHandle {
-
-    /// Create an Handle from a task ID. 
+    /// Create an Handle from a task ID.
     /// (creates the task directory)
     pub fn from_task_id(task_id: i32) -> Self {
         // fetch $PROCESS_DIR_ENV variable
         let processes_dir: String = env::var(PROCESS_DIR_ENV_NAME)
             .unwrap_or_else(|_| env::temp_dir().to_string_lossy().to_string());
         // build process directory path
-        let output_dir = Path::new(&processes_dir)
-            .join(format!("{}{}", &PROCESS_OUTPUT_DIR_PREFIX, task_id));
+        let output_dir =
+            Path::new(&processes_dir).join(format!("{}{}", &PROCESS_OUTPUT_DIR_PREFIX, task_id));
         Self {
             directory: output_dir.to_path_buf(),
         }
@@ -78,10 +72,19 @@ impl MonitorHandle {
     /// Create MonitorHandle directories, and path as absolute.
     /// NOTE: This function is blocking.
     pub fn create_directory(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        fs::create_dir_all(&self.directory)
-            .map_err(|e| format!("Can't create handle directory: '{:?}': {:?}", &self.directory, e))?;
-        fs::create_dir_all(&self.working_directory())
-            .map_err(|e| format!("Can't create cwd: '{:?}': {:?}", &self.working_directory(), e))?;
+        fs::create_dir_all(&self.directory).map_err(|e| {
+            format!(
+                "Can't create handle directory: '{:?}': {:?}",
+                &self.directory, e
+            )
+        })?;
+        fs::create_dir_all(&self.working_directory()).map_err(|e| {
+            format!(
+                "Can't create cwd: '{:?}': {:?}",
+                &self.working_directory(),
+                e
+            )
+        })?;
 
         self.directory = self.directory.canonicalize()?;
         Ok(())

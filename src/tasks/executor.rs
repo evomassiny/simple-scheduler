@@ -1,29 +1,22 @@
 use nix::{
     libc::{exit, EXIT_SUCCESS, STDERR_FILENO, STDOUT_FILENO},
-    unistd::{chdir, execv, fork, getpid, setsid, ForkResult},
     sys::wait::waitpid,
+    unistd::{chdir, execv, fork, getpid, setsid, ForkResult},
 };
 use rocket::tokio::task::spawn_blocking;
-use std::{
-    os::unix::io::RawFd,
-    ffi::CString,
-};
+use std::{ffi::CString, os::unix::io::RawFd};
 
-use crate::tasks::TaskProcess;
-use crate::tasks::task_status::TaskStatus;
 use crate::tasks::monitor::Monitor;
 use crate::tasks::monitor_handle::MonitorHandle;
-use crate::tasks::pipe::{Pipe,Fence};
+use crate::tasks::pipe::{Fence, Pipe};
+use crate::tasks::task_status::TaskStatus;
 use crate::tasks::utils::{
+    assign_file_to_fd, block_sigchild, close_everything_but, rename_current_process,
     reset_signal_handlers,
-    assign_file_to_fd,
-    close_everything_but,
-    rename_current_process,
-    block_sigchild,
 };
+use crate::tasks::TaskProcess;
 
 impl TaskProcess {
-
     /**
      * Spawn a `command` in a dedicated daemon process.
      *
@@ -44,11 +37,12 @@ impl TaskProcess {
     fn spawn_blocking(cmd: &str, id: i32) -> Result<Self, Box<dyn std::error::Error>> {
         // create process handle (holds path to process related files)
         let mut handle = MonitorHandle::from_task_id(id);
-        handle.create_directory()
+        handle
+            .create_directory()
             .map_err(|e| format!("can't create task process directory {:?}", e))?;
         // create a pipe to send pid from grandchild to grandparent
         let mut pipe = Pipe::new()?;
-        // create fence to block the executor process, until the monitor 
+        // create fence to block the executor process, until the monitor
         // one decides to release it.
         let fence = Fence::new()?;
 
@@ -84,8 +78,7 @@ impl TaskProcess {
                                 fence.write_end_fd(),
                                 fence.read_end_fd(),
                             ];
-                            close_everything_but(&fd_to_keep[..])
-                                .expect("Could not close fd");
+                            close_everything_but(&fd_to_keep[..]).expect("Could not close fd");
 
                             // set STDERR and STDOUT to files
                             assign_file_to_fd(&handle.stderr_file(), STDERR_FILENO)
@@ -94,11 +87,12 @@ impl TaskProcess {
                                 .expect("Failed to redirect stdout");
 
                             // Change directory to '$cwd'
-                            chdir(&handle.working_directory()).expect("could not change directory to '$cwd'. ");
-                            
+                            chdir(&handle.working_directory())
+                                .expect("could not change directory to '$cwd'. ");
+
                             // block SIGCHLD signal, so we dont lose some before listening on them
                             // (might not be needed)
-                            block_sigchild().expect("Could not block SIGCHLD"); 
+                            block_sigchild().expect("Could not block SIGCHLD");
 
                             // Build the command line
                             // * build command args
@@ -119,7 +113,9 @@ impl TaskProcess {
                                     reset_signal_handlers().expect("failed to reset signals");
                                     // Close pipe, at this point only stderr/stdout file should be open
                                     pipe.close().expect("Could not close pipe");
-                                    fence.wait_for_signal().expect("Waiting for 'GO/NO GO' failed.");
+                                    fence
+                                        .wait_for_signal()
+                                        .expect("Waiting for 'GO/NO GO' failed.");
                                     let _ = execv(&args[0], &args);
                                     unreachable!();
                                 }
@@ -145,7 +141,10 @@ impl TaskProcess {
 
                                     //if let Err(e) = monitor_process(child, &handle, fence) {
                                     if let Err(e) = monitor.run() {
-                                        eprintln!("Monitor: '{}' failed with '{:?}'", &monitor_name, e);
+                                        eprintln!(
+                                            "Monitor: '{}' failed with '{:?}'",
+                                            &monitor_name, e
+                                        );
                                         panic!("Process monitoring Failed");
                                     }
                                     // once the child has terminated, we can exit safely
@@ -159,7 +158,7 @@ impl TaskProcess {
                             exit(EXIT_SUCCESS);
                         }
                     }
-                },
+                }
                 // Caller process,
                 // waits for grandchild's PID reception,
                 // and returns a `Process` instance
@@ -173,7 +172,7 @@ impl TaskProcess {
                         pid: grandchild,
                         handle: handle,
                     })
-                },
+                }
             }
         }
     }

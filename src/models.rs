@@ -23,4 +23,3 @@ pub struct TaskDependency {
     pub child: i32,
     pub parent: i32,
 }
-

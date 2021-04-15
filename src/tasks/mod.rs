@@ -1,10 +1,10 @@
-mod task_status;
-mod pipe;
+mod executor;
 mod monitor;
 mod monitor_handle;
-mod utils;
-mod executor;
+mod pipe;
 mod query;
+mod task_status;
+mod utils;
 
 pub use crate::tasks::monitor_handle::MonitorHandle;
 pub use crate::tasks::task_status::TaskStatus;
@@ -15,5 +15,3 @@ pub struct TaskProcess {
     pub pid: i32,
     pub handle: MonitorHandle,
 }
-
-

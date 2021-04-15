@@ -1,20 +1,16 @@
-use std::path::PathBuf;
-use std::convert::TryInto;
-use nix::{
-    libc,
-    sys::signalfd::siginfo,
-};
-use serde::{Serialize, Deserialize};
-use serde_json;
-use rocket::tokio::{
-    io::{AsyncRead,AsyncWrite,AsyncWriteExt,AsyncReadExt},
-    fs::File,
-};
 use crate::tasks::query::ByteSerializabe;
-
+use nix::{libc, sys::signalfd::siginfo};
+use rocket::tokio::{
+    fs::File,
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+};
+use serde::{Deserialize, Serialize};
+use serde_json;
+use std::convert::TryInto;
+use std::path::PathBuf;
 
 /// Represents all the states of a monitoree process
-#[derive(Debug,Serialize,Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum TaskStatus {
     Pending,
     Stopped,
@@ -24,7 +20,7 @@ pub enum TaskStatus {
     Running,
 }
 impl TaskStatus {
-    /// Build a Status from the siginfo struct returned by reading a SIGCHLD signalfd 
+    /// Build a Status from the siginfo struct returned by reading a SIGCHLD signalfd
     /// based on `man 2 sigaction`
     pub fn from_siginfo(info: &siginfo) -> Result<Self, String> {
         // check the signal that was bound to the signalfd this siginfo is the result of.
@@ -32,16 +28,17 @@ impl TaskStatus {
             return Err("not a SIG_CHLD siginfo".to_string());
         }
         match info.ssi_code {
-            libc::CLD_EXITED => {
-                match info.ssi_status {
-                    libc::EXIT_SUCCESS => Ok(Self::Succeed),
-                    libc::EXIT_FAILURE => Ok(Self::Failed),
-                    unknown => Err(format!("Unkown return status code '{}' in siginfo", unknown)),
-                }
+            libc::CLD_EXITED => match info.ssi_status {
+                libc::EXIT_SUCCESS => Ok(Self::Succeed),
+                libc::EXIT_FAILURE => Ok(Self::Failed),
+                unknown => Err(format!(
+                    "Unkown return status code '{}' in siginfo",
+                    unknown
+                )),
             },
-            libc::CLD_KILLED  => Ok(Self::Killed),
+            libc::CLD_KILLED => Ok(Self::Killed),
             libc::CLD_DUMPED => Ok(Self::Failed),
-            libc::CLD_TRAPPED  => Ok(Self::Failed),
+            libc::CLD_TRAPPED => Ok(Self::Failed),
             libc::CLD_STOPPED => Ok(Self::Stopped),
             libc::CLD_CONTINUED => Ok(Self::Running),
             unknown => Err(format!("Unkown status code '{}' in siginfo", unknown)),
@@ -67,8 +64,7 @@ impl TaskStatus {
         std::fs::write(&tmp, serde_json::to_string(self)?)
             .map_err(|e| format!("Could not write {:?}, {:?}", &tmp, e))?;
         // rename is atomic if both paths are in the same mount point.
-        std::fs::rename(&tmp, path)
-            .map_err(|e| format!("Could not create {:?}, {:?}", path, e))?;
+        std::fs::rename(&tmp, path).map_err(|e| format!("Could not create {:?}, {:?}", path, e))?;
         Ok(())
     }
 
@@ -83,7 +79,9 @@ impl TaskStatus {
     }
 
     /// Reads one TaskStatus from an AsyncRead instance.
-    pub async fn async_read_from<T: AsyncRead + Unpin>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn async_read_from<T: AsyncRead + Unpin>(
+        reader: &mut T,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         const USIZE_SIZE: usize = std::mem::size_of::<usize>();
         let mut size_buf: [u8; USIZE_SIZE] = [0; USIZE_SIZE];
 
@@ -94,9 +92,11 @@ impl TaskStatus {
 
         // then read the content itself
         let mut data: Vec<u8> = Vec::with_capacity(content_len);
-        // SAFETY: safe because we only read its content 
+        // SAFETY: safe because we only read its content
         // if it has been overwritten by read_exact()
-        unsafe { data.set_len(content_len); }
+        unsafe {
+            data.set_len(content_len);
+        }
         handle = reader.take(content_len.try_into()?);
         handle.read_exact(&mut data).await?;
         let status = Self::from_bytes(&data)?;
@@ -104,7 +104,10 @@ impl TaskStatus {
     }
 
     /// Sends one TaskStatus to an AsyncWrite instance.
-    pub async fn async_send_to<T: AsyncWrite + Unpin>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn async_send_to<T: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut T,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut bytes: Vec<u8> = self.to_bytes()?;
         let mut msg: Vec<u8> = Vec::new();
         msg.extend_from_slice(&bytes.len().to_be_bytes());
@@ -113,5 +116,4 @@ impl TaskStatus {
         writer.flush().await?;
         Ok(())
     }
-
 }
