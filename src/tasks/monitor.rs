@@ -1,4 +1,4 @@
-use crate::tasks::monitor_handle::MonitorHandle;
+use crate::tasks::handle::TaskHandle;
 use crate::tasks::pipe::Fence;
 use crate::tasks::query::{Query, Sendable};
 use crate::tasks::task_status::TaskStatus;
@@ -27,7 +27,7 @@ pub struct Monitor {
     pub start_fence: Option<Fence>,
     pub task: Pid,
     pub status: TaskStatus,
-    pub handle: MonitorHandle,
+    pub handle: TaskHandle,
     pub hypervisor_socket: Option<PathBuf>,
 }
 
@@ -208,6 +208,8 @@ impl Monitor {
         }
         // remove the socket file
         std::fs::remove_file(&self.handle.monitor_socket())?;
+        // remove the pid file
+        std::fs::remove_file(&self.handle.pid_file())?;
 
         Ok(())
     }

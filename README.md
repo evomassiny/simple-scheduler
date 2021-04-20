@@ -33,17 +33,15 @@ The whole spawning process is described as follows:
 </li>
 
 <li>
-    <p>the temporary process send the <strong>monitor PID</strong> to the <strong>hypervisor</strong></p>
-    <p><img src="doc/spawing-process/step-4.svg" width="500" height="75" /></p>
-</li>
-
-<li>
     <p>the temporary process terminates, monitor is affected as a child of the PID 1 process by the kernel.</p>
     <p>The monitor process will then:
         <ul>
              <li> closes all opened file descriptor, </li>
-             <li> detaches itself from its original TTY,  </li>
-             <li> todo!() </li>
+             <li> detaches itself from its original TTY</li>
+             <li> close all opened file descriptors </li>
+             <li> reset its signal mask </li>
+             <li> redirects its outputs to dedicated files </li>
+             <li> change its working directory to a dedicated directory </li>
         </ul>
     </p>
     <p><img src="doc/spawing-process/step-5.svg" width="500" height="75" /></p>
@@ -77,7 +75,7 @@ The whole spawning process is described as follows:
 </li>
 
 <li>
-    <p>Finally the monitor terminates</p>
+    <p>The monitor write the executor task status into a dedicated file, remove the task PID file, and finally terminates</p>
     <p><img src="doc/spawing-process/step-11.svg" width="500" height="75" /></p>
 </li>
 

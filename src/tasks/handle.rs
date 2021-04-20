@@ -1,6 +1,12 @@
 use crate::tasks::query::Query;
 use crate::tasks::task_status::TaskStatus;
-use rocket::tokio::{fs::metadata, net::UnixStream};
+use rocket::tokio::{
+    fs::metadata,
+    net::UnixStream,
+    fs::File,
+    io::AsyncReadExt,
+};
+use nix::unistd::Pid;
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -20,15 +26,17 @@ pub const PROCESS_STATUS_FILE_NAME: &str = "return_status";
 pub const IPC_SOCKET: &str = "monitor.sock";
 /// CWD directory name
 pub const PROCESS_CWD_DIR_NAME: &str = "cwd";
+/// PID file name
+pub const PROCESS_PID_FILE_NAME: &str = "pid";
 
-/// holds path related to a monitor process
+/// holds path related to a task process
 #[derive(Debug)]
-pub struct MonitorHandle {
+pub struct TaskHandle {
     /// process directory
     pub directory: PathBuf,
 }
 
-impl MonitorHandle {
+impl TaskHandle {
     /// Create an Handle from a task ID.
     /// (creates the task directory)
     pub fn from_task_id(task_id: i32) -> Self {
@@ -69,7 +77,12 @@ impl MonitorHandle {
         self.directory.join(&PROCESS_CWD_DIR_NAME)
     }
 
-    /// Create MonitorHandle directories, and path as absolute.
+    /// file that contains the PID of the task process
+    pub fn pid_file(&self) -> PathBuf {
+        self.directory.join(&PROCESS_PID_FILE_NAME)
+    }
+
+    /// Create TaskHandle directories, and path as absolute.
     /// NOTE: This function is blocking.
     pub fn create_directory(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         fs::create_dir_all(&self.directory).map_err(|e| {
@@ -90,26 +103,71 @@ impl MonitorHandle {
         Ok(())
     }
 
+    /// See if a PID file exists to guess if the task is running or not.
+    pub async fn is_running(&self) -> bool {
+        match metadata(self.pid_file()).await {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+
+    /// save task PID into `self.pid_file()` (as text).
+    pub fn save_pid(&self, pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
+        let pid_file = self.pid_file();
+        std::fs::write(&pid_file, pid.to_string())
+            .map_err(|e| format!("Could not write {:?}, {:?}", &pid_file, e))?;
+        Ok(())
+    }
+
+    /// attempt to read the task PID from `self.pid_file()`
+    pub async fn get_pid(&self) -> Result<Pid, Box<dyn std::error::Error>> {
+        let mut content = String::new();
+        let path = self.pid_file();
+        // check if status file exists
+        match metadata(&path).await {
+            Ok(_) => {
+                let mut pid_file = File::open(&path).await?;
+                pid_file.read_to_string(&mut content).await?;
+                let pid: i32 = content.parse::<i32>()?;
+                Ok(Pid::from_raw(pid))
+            },
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// start the task
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.is_running().await {
+            return Err("task is not running".into());
+        }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
         Query::Start.async_send_to(&mut sock).await
     }
 
     /// kill the task
     pub async fn kill(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.is_running().await {
+            return Err("task is not running".into());
+        }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
         Query::Kill.async_send_to(&mut sock).await
     }
 
     /// ask the task to terminate
     pub async fn terminate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.is_running().await {
+            return Err("task is not running".into());
+        }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
         Query::Terminate.async_send_to(&mut sock).await
     }
 
     /// return the status of the task
     pub async fn get_status(&self) -> Result<TaskStatus, Box<dyn std::error::Error>> {
+        if !self.is_running().await {
+            return Err("task is not running".into());
+        }
         // check if status file exists
         if let Ok(_md) = metadata(self.status_file()).await {
             return TaskStatus::async_from_file(&self.status_file()).await;

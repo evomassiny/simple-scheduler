@@ -1,22 +1,22 @@
 use nix::{
     libc::{exit, EXIT_SUCCESS, STDERR_FILENO, STDOUT_FILENO},
     sys::wait::waitpid,
-    unistd::{chdir, execv, fork, getpid, setsid, ForkResult},
+    unistd::{chdir, execv, fork, getpid, setsid, ForkResult, Pid},
 };
 use rocket::tokio::task::spawn_blocking;
 use std::{ffi::CString, os::unix::io::RawFd};
 
 use crate::tasks::monitor::Monitor;
-use crate::tasks::monitor_handle::MonitorHandle;
-use crate::tasks::pipe::{Fence, Pipe};
+use crate::tasks::handle::TaskHandle;
+use crate::tasks::pipe::Fence;
 use crate::tasks::task_status::TaskStatus;
 use crate::tasks::utils::{
     assign_file_to_fd, block_sigchild, close_everything_but, rename_current_process,
     reset_signal_handlers,
 };
-use crate::tasks::TaskProcess;
 
-impl TaskProcess {
+impl TaskHandle {
+
     /**
      * Spawn a `command` in a dedicated daemon process.
      *
@@ -36,12 +36,10 @@ impl TaskProcess {
      */
     fn spawn_blocking(cmd: &str, id: i32) -> Result<Self, Box<dyn std::error::Error>> {
         // create process handle (holds path to process related files)
-        let mut handle = MonitorHandle::from_task_id(id);
+        let mut handle = Self::from_task_id(id);
         handle
             .create_directory()
             .map_err(|e| format!("can't create task process directory {:?}", e))?;
-        // create a pipe to send pid from grandchild to grandparent
-        let mut pipe = Pipe::new()?;
         // create fence to block the executor process, until the monitor
         // one decides to release it.
         let fence = Fence::new()?;
@@ -70,11 +68,9 @@ impl TaskProcess {
                             let _ = setsid().expect("Failed to detach");
 
                             // Close all files but stdin/stdout and pipes:
-                            let fd_to_keep: [RawFd; 6] = [
+                            let fd_to_keep: [RawFd; 4] = [
                                 STDERR_FILENO as RawFd,
                                 STDOUT_FILENO as RawFd,
-                                pipe.write_end_fd(),
-                                pipe.read_end_fd(),
                                 fence.write_end_fd(),
                                 fence.read_end_fd(),
                             ];
@@ -111,8 +107,8 @@ impl TaskProcess {
                                 ForkResult::Child => {
                                     // remove all signal masks
                                     reset_signal_handlers().expect("failed to reset signals");
-                                    // Close pipe, at this point only stderr/stdout file should be open
-                                    pipe.close().expect("Could not close pipe");
+                                    // write pid to file
+                                    handle.save_pid(getpid()).expect("failed to write PID file");
                                     fence
                                         .wait_for_signal()
                                         .expect("Waiting for 'GO/NO GO' failed.");
@@ -124,11 +120,6 @@ impl TaskProcess {
                                     // change process name to a distinct one (from the server)
                                     let monitor_name = format!("monitor {}", id);
                                     let _ = rename_current_process(&monitor_name);
-
-                                    // send the monitor PID to the caller process
-                                    let self_pid = getpid();
-                                    let _ = pipe.send_int(self_pid.as_raw());
-                                    pipe.close().expect("Could not close pipe");
 
                                     // wait for child completion, and listen for request
                                     let mut monitor = Monitor {
@@ -163,15 +154,9 @@ impl TaskProcess {
                 // waits for grandchild's PID reception,
                 // and returns a `Process` instance
                 ForkResult::Parent { child, .. } => {
-                    let grandchild: i32 = pipe.recv_int()?;
-                    pipe.close()?;
                     // wait for child (so its not a zombie process)
                     let _ = waitpid(child, None);
-                    Ok(TaskProcess {
-                        id: 0,
-                        pid: grandchild,
-                        handle,
-                    })
+                    Ok(handle)
                 }
             }
         }
