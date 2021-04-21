@@ -23,13 +23,22 @@ async fn index() -> &'static str {
 }
 
 #[get("/spawn")]
-async fn spawn(_pool: State<'_, SqlitePool>) -> String {
-    match TaskHandle::spawn("sleep 10 && echo $(date)", 1).await {
+async fn spawn(pool: State<'_, SqlitePool>) -> String {
+    let cmd: String = "sleep 60 && echo $(date)".to_string();
+    let mut conn = pool.acquire().await.unwrap();
+    let query_result = sqlx::query("INSERT INTO tasks (name, command) VALUES (?, ?)")
+        .bind("")
+        .bind(&cmd)
+        .execute(&mut conn)
+        .await
+        .expect("Could not send request");
+
+    match TaskHandle::spawn(&cmd, query_result.last_insert_rowid()).await {
         Ok(task) => {
-            let _ = task.start().await;
-            let status = task.get_status().await.unwrap();
-            let pid = task.get_pid().await.unwrap();
-            format!("Spawned PID: {}, {:?}", pid, status)
+            let _ = task.start().await.expect("Could not start task");
+            let status = task.get_status().await.expect("Could not get status");
+            let pid = task.get_pid().await.expect("could not get pid");
+            format!("task '{:?}', spawned with PID: {}, {:?}", &task.directory, pid, status)
         }
         Err(error) => format!("Failed: {:?}", error),
     }

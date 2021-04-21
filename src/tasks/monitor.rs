@@ -24,7 +24,8 @@ use std::{
 const WAIT_FOREVER_TIMEOUT: isize = -1;
 
 pub struct Monitor {
-    pub start_fence: Option<Fence>,
+    pub task_fence: Option<Fence>,
+    pub spawn_fence: Option<Fence>,
     pub task: Pid,
     pub status: TaskStatus,
     pub handle: TaskHandle,
@@ -34,7 +35,7 @@ pub struct Monitor {
 impl Monitor {
     /// start task process (release blocking Fence).
     fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(rel) = self.start_fence.take() {
+        if let Some(rel) = self.task_fence.take() {
             rel.release_waiter()?;
             self.status = TaskStatus::Running;
         }
@@ -143,6 +144,12 @@ impl Monitor {
         // stores connection streams
         let mut streams_by_fd: HashMap<RawFd, UnixStream> = HashMap::new();
         let mut streams = listener.incoming();
+
+        // release the spanwer process
+        if let Some(fence) = self.spawn_fence.take() {
+            fence.release_waiter()?;
+        }
+
         // start the event loop:
         'event_loop: while let Ok(event_count) =
             epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT)

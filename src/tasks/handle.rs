@@ -39,7 +39,7 @@ pub struct TaskHandle {
 impl TaskHandle {
     /// Create an Handle from a task ID.
     /// (creates the task directory)
-    pub fn from_task_id(task_id: i32) -> Self {
+    pub fn from_task_id(task_id: i64) -> Self {
         // fetch $PROCESS_DIR_ENV variable
         let processes_dir: String = env::var(PROCESS_DIR_ENV_NAME)
             .unwrap_or_else(|_| env::temp_dir().to_string_lossy().to_string());
@@ -138,11 +138,12 @@ impl TaskHandle {
 
     /// start the task
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
-        if !self.is_running().await {
-            return Err("task is not running".into());
-        }
-        let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
-        Query::Start.async_send_to(&mut sock).await
+        let mut sock = UnixStream::connect(&self.monitor_socket())
+            .await
+            .map_err(|_| format!("Could not open socket {:?}", &self.monitor_socket()))?;
+        Query::Start.async_send_to(&mut sock)
+            .await
+            .map_err(|_| "Could not send status request to socket".to_string().into())
     }
 
     /// kill the task
@@ -165,9 +166,9 @@ impl TaskHandle {
 
     /// return the status of the task
     pub async fn get_status(&self) -> Result<TaskStatus, Box<dyn std::error::Error>> {
-        if !self.is_running().await {
-            return Err("task is not running".into());
-        }
+        //if !self.is_running().await {
+            //return Err("task is not running".into());
+        //}
         // check if status file exists
         if let Ok(_md) = metadata(self.status_file()).await {
             return TaskStatus::async_from_file(&self.status_file()).await;

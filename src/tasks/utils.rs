@@ -113,6 +113,7 @@ pub fn reset_signal_handlers() -> Result<(), String> {
 pub fn assign_file_to_fd(file_path: &Path, fd: RawFd) -> Result<(), String> {
     let file = OpenOptions::new()
         .append(true)
+        .create(true)
         .open(file_path)
         .map_err(|_| format!("could not open '{}'", file_path.display()))?;
     let _ = dup2(file.into_raw_fd(), fd).map_err(|_| "Failed to redirect stderr".to_string())?;

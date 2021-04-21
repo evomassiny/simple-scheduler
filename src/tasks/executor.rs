@@ -34,7 +34,7 @@ impl TaskHandle {
      *  SAFETY: This method uses unsafe unix calls to spawn the process
      *  **as a daemon process**, so it can outlive the caller process.
      */
-    fn spawn_blocking(cmd: &str, id: i32) -> Result<Self, Box<dyn std::error::Error>> {
+    fn spawn_blocking(cmd: &str, id: i64) -> Result<Self, Box<dyn std::error::Error>> {
         // create process handle (holds path to process related files)
         let mut handle = Self::from_task_id(id);
         handle
@@ -42,7 +42,8 @@ impl TaskHandle {
             .map_err(|e| format!("can't create task process directory {:?}", e))?;
         // create fence to block the executor process, until the monitor
         // one decides to release it.
-        let fence = Fence::new()?;
+        let task_fence = Fence::new()?;
+        let spawn_fence = Fence::new()?;
 
         unsafe {
             // fork process
@@ -68,11 +69,13 @@ impl TaskHandle {
                             let _ = setsid().expect("Failed to detach");
 
                             // Close all files but stdin/stdout and pipes:
-                            let fd_to_keep: [RawFd; 4] = [
+                            let fd_to_keep: [RawFd; 6] = [
                                 STDERR_FILENO as RawFd,
                                 STDOUT_FILENO as RawFd,
-                                fence.write_end_fd(),
-                                fence.read_end_fd(),
+                                task_fence.write_end_fd(),
+                                task_fence.read_end_fd(),
+                                spawn_fence.write_end_fd(),
+                                spawn_fence.read_end_fd(),
                             ];
                             close_everything_but(&fd_to_keep[..]).expect("Could not close fd");
 
@@ -109,7 +112,7 @@ impl TaskHandle {
                                     reset_signal_handlers().expect("failed to reset signals");
                                     // write pid to file
                                     handle.save_pid(getpid()).expect("failed to write PID file");
-                                    fence
+                                    task_fence
                                         .wait_for_signal()
                                         .expect("Waiting for 'GO/NO GO' failed.");
                                     let _ = execv(&args[0], &args);
@@ -123,14 +126,14 @@ impl TaskHandle {
 
                                     // wait for child completion, and listen for request
                                     let mut monitor = Monitor {
-                                        start_fence: Some(fence),
+                                        task_fence: Some(task_fence),
+                                        spawn_fence: Some(spawn_fence),
                                         task: child,
                                         status: TaskStatus::Pending,
                                         handle,
                                         hypervisor_socket: None,
                                     };
 
-                                    //if let Err(e) = monitor_process(child, &handle, fence) {
                                     if let Err(e) = monitor.run() {
                                         eprintln!(
                                             "Monitor: '{}' failed with '{:?}'",
@@ -156,6 +159,8 @@ impl TaskHandle {
                 ForkResult::Parent { child, .. } => {
                     // wait for child (so its not a zombie process)
                     let _ = waitpid(child, None);
+                    // wait for the monitor to be ready before returning
+                    spawn_fence.wait_for_signal()?;
                     Ok(handle)
                 }
             }
@@ -173,7 +178,7 @@ impl TaskHandle {
      *
      *  see https://www.freedesktop.org/software/systemd/man/daemon.html
      */
-    pub async fn spawn(cmd: &str, id: i32) -> Result<Self, String> {
+    pub async fn spawn(cmd: &str, id: i64) -> Result<Self, String> {
         let command: String = String::from(cmd);
         // wrap the blocking function into its own thread, to avoid messing
         // with the current executor
