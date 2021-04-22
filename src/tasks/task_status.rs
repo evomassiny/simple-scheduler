@@ -89,12 +89,7 @@ impl TaskStatus {
         let content_len: usize = usize::from_be_bytes(size_buf);
 
         // then read the content itself
-        let mut data: Vec<u8> = Vec::with_capacity(content_len);
-        // SAFETY: safe because we only read its content
-        // if it has been overwritten by read_exact()
-        unsafe {
-            data.set_len(content_len);
-        }
+        let mut data: Vec<u8> = vec![0; content_len];
         handle = reader.take(content_len.try_into()?);
         handle.read_exact(&mut data).await?;
         let status = Self::from_bytes(&data)?;
