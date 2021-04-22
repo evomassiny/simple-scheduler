@@ -1,3 +1,4 @@
+
 digraph step {
     rankdir="LR";
     ranksep=0.5;
@@ -7,13 +8,13 @@ digraph step {
 
     "hypervisor";
     "monitor" [color="#1aaa55", style=filled, fontcolor=white];
-    "executor";
+    "executor" [color="#bf4042", style=filled, fontcolor=white];
 
     "tmp"[style=invis];
     "hypervisor" -> "tmp" [style=invis];
     "tmp" -> "monitor" [style=invis];
 
-    "hypervisor" -> "monitor" [style=dashed, label="START (monitor.sock)", labelfloat=true];
+    "hypervisor" -> "monitor" [style=invis];
     "monitor" -> "executor"[style=invis];
 }
 

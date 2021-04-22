@@ -7,7 +7,7 @@ digraph step {
 
     "hypervisor";
     "monitor" [color="#1aaa55", style=filled, fontcolor=white];
-    "executor"[color="#BF4042", style=filled, fontcolor=white];
+    "executor";
 
     "tmp"[style=invis];
     "hypervisor" -> "tmp" [style=invis];
@@ -15,5 +15,7 @@ digraph step {
 
     "hypervisor" -> "monitor" [style=invis];
     "monitor" -> "executor"[style=invis];
+
+    "monitor" -> "hypervisor"[style=dashed, label="ready (pipe)", dir=back];
 }
 

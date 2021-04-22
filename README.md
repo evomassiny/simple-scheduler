@@ -53,7 +53,7 @@ The whole spawning process is described as follows:
 </li>
 
 <li>
-    <p>the executor calls <strong>execve()</strong> and runs the task, and the monitor start its monitoring event loop.</p>
+    <p>the executor then waits for a starting signal. In the meantime the monitor notifies the hypervisor that it is ready to accept requests.</p>
     <p><img src="doc/spawing-process/step-7.svg" width="500" height="100" /></p>
 </li>
 
@@ -61,6 +61,17 @@ The whole spawning process is described as follows:
     <p>While the task is running in the executor, the monitor is listenning on its 
     <em>monitor.sock</em> unix domain socket for any commands from the hypervisor (status update, kill requests...).</p>
     <p><img src="doc/spawing-process/step-8.svg" width="500" height="100" /></p>
+</li>
+
+<li>
+    <p>When the hypervisor sends a <strong>"start"</strong> request to the <em>monitor</em>, 
+    the monitor wakes the executor.</p>
+    <p><img src="doc/spawing-process/step-8-bis.svg" width="500" height="100" /></p>
+</li>
+
+<li>
+    <p>After that, the executor starts the task by calling <strong>execvp()</strong></p>
+    <p><img src="doc/spawing-process/step-8-ter.svg" width="500" height="100" /></p>
 </li>
 
 <li>

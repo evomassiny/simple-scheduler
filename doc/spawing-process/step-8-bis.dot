@@ -13,7 +13,8 @@ digraph step {
     "hypervisor" -> "tmp" [style=invis];
     "tmp" -> "monitor" [style=invis];
 
-    "hypervisor" -> "monitor" [style=dashed, label="START (monitor.sock)", labelfloat=true];
-    "monitor" -> "executor"[style=invis];
+    "hypervisor" -> "monitor" [style=invis];
+    "monitor" -> "executor"[style=dashed, label="RELEASE\n(pipe)", labelfloat=true];
 }
+
 

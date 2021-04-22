@@ -26,16 +26,15 @@
 <title>hypervisor&#45;&gt;monitor</title>
 <path fill="none" stroke="#000000" stroke-width=".4" stroke-dasharray="5,2" d="M127.7136,-132.1528C140.6106,-135.0017 154.1699,-137.5109 167,-139 224.3925,-145.6611 239.6075,-145.6611 297,-139 308.1261,-137.7087 319.8006,-135.6502 331.1159,-133.2684"/>
 <polygon fill="#000000" stroke="#000000" stroke-width=".4" points="331.7679,-134.918 336.2864,-132.1528 331.0297,-131.4968 331.7679,-134.918"/>
-<text text-anchor="middle" x="232" y="-161.8" font-family="Times,serif" font-size="14.00" fill="#000000">command</text>
-<text text-anchor="middle" x="232" y="-146.8" font-family="Times,serif" font-size="14.00" fill="#000000"> (monitor.sock)</text>
+<text text-anchor="middle" x="232" y="-146.8" font-family="Times,serif" font-size="14.00" fill="#000000">START (monitor.sock)</text>
 </g>
 <!-- tmp -->
 <!-- hypervisor&#45;&gt;tmp -->
 <!-- executor -->
 <g id="node3" class="node">
 <title>executor</title>
-<ellipse fill="#bf4042" stroke="#bf4042" cx="566" cy="-115" rx="65" ry="65"/>
-<text text-anchor="middle" x="566" y="-110" font-family="Times,serif" font-size="20.00" fill="#ffffff">executor</text>
+<ellipse fill="none" stroke="#000000" cx="566" cy="-115" rx="65" ry="65"/>
+<text text-anchor="middle" x="566" y="-110" font-family="Times,serif" font-size="20.00" fill="#000000">executor</text>
 </g>
 <!-- monitor&#45;&gt;executor -->
 <!-- tmp&#45;&gt;monitor -->
