@@ -53,29 +53,28 @@ The whole spawning process is described as follows:
 </li>
 
 <li>
-    <p>the executor then waits for a starting signal. In the meantime the monitor notifies the hypervisor that it is ready to accept requests.</p>
+    <p>the executor then waits for a starting signal. In the meantime the monitor notifies the hypervisor that it is ready to accept requests and
+    starts listening on its <em>monitor.sock</em> unix domain socket for any commands (start task request, status update, kill requests...).</p>
     <p><img src="doc/spawing-process/step-7.svg" width="500" height="100" /></p>
 </li>
 
 <li>
-    <p>While the task is running in the executor, the monitor is listenning on its 
-    <em>monitor.sock</em> unix domain socket for any commands from the hypervisor (status update, kill requests...).</p>
+    <p>When the hypervisor wants to start the task, it sends a "START" request to the monitor: </p>
     <p><img src="doc/spawing-process/step-8.svg" width="500" height="100" /></p>
 </li>
 
 <li>
-    <p>When the hypervisor sends a <strong>"start"</strong> request to the <em>monitor</em>, 
-    the monitor wakes the executor.</p>
+    <p>on receiving the "START" request, the monitor wakes the executor up.<p>
     <p><img src="doc/spawing-process/step-8-bis.svg" width="500" height="100" /></p>
 </li>
 
 <li>
-    <p>After that, the executor starts the task by calling <strong>execvp()</strong></p>
+    <p>After that, the executor starts the task by calling <strong>execvp()</strong>, replacing its whole content by the requested task process.</p>
     <p><img src="doc/spawing-process/step-8-ter.svg" width="500" height="100" /></p>
 </li>
 
 <li>
-    <p>When the task terminates, the executor sends a <strong>SIGCHLD</strong> signal to the monitor process.</p>
+    <p>When the task terminates, the kernel sends a <strong>SIGCHLD</strong> signal to the monitor process to notify that it has returned.</p>
     <p><img src="doc/spawing-process/step-9.svg" width="500" height="100" /></p>
 </li>
 
