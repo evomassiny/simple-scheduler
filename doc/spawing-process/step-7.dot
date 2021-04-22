@@ -13,9 +13,8 @@ digraph step {
     "hypervisor" -> "tmp" [style=invis];
     "tmp" -> "monitor" [style=invis];
 
-    "hypervisor" -> "monitor" [style=invis];
     "monitor" -> "executor"[style=invis];
 
-    "monitor" -> "hypervisor"[style=dashed, label="ready (pipe)", dir=back];
+    "hypervisor" -> "monitor" [style=dashed, dir=back, label="READY\n(shared pipe)"];
 }
 
