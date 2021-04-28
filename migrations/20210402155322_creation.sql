@@ -15,7 +15,8 @@ CREATE TABLE jobs (
 
 CREATE TABLE tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      name VARCHAR(256) NOT NULL,
+      name VARCHAR(256) NOT NULL DEFAULT "",
+      handle VARCHAR(512) NOT NULL DEFAULT "",
       status INTEGER NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5)),
       command TEXT NOT NULL,
       job INTEGER,

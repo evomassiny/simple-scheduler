@@ -2,7 +2,7 @@
 ```
 cargo install sqlx-cli
 sqlx database create
-sqlx migration run 
+sqlx migrate run 
 ```
 
 # Internals

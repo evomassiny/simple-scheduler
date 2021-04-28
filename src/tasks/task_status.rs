@@ -6,10 +6,10 @@ use rocket::tokio::{
 };
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Represents all the states of a monitoree process
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum TaskStatus {
     Pending,
     Stopped,
@@ -97,6 +97,61 @@ impl TaskStatus {
     }
 
     /// Sends one TaskStatus to an AsyncWrite instance.
+    pub async fn async_send_to<T: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut T,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut bytes: Vec<u8> = self.to_bytes()?;
+        let mut msg: Vec<u8> = Vec::new();
+        msg.extend_from_slice(&bytes.len().to_be_bytes());
+        msg.append(&mut bytes);
+        writer.write_all(&msg).await?;
+        writer.flush().await?;
+        Ok(())
+    }
+
+    /// return an integer representation of Self
+    pub fn as_i64(&self) -> i64 {
+        match *self {
+            Self::Pending => 0,
+            Self::Stopped => 1,
+            Self::Killed => 2,
+            Self::Failed => 3,
+            Self::Succeed => 4,
+            Self::Running => 5,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StatusUpdateMsg {
+    pub task_handle: PathBuf,
+    pub status: TaskStatus,
+}
+impl StatusUpdateMsg {
+
+
+    /// Reads one StatusUpdate from an AsyncRead instance.
+    pub async fn async_read_from<T: AsyncRead + Unpin>(
+        reader: &mut T,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        const USIZE_SIZE: usize = std::mem::size_of::<usize>();
+        let mut size_buf: [u8; USIZE_SIZE] = [0; USIZE_SIZE];
+
+        // first read the content size
+        let mut handle = reader.take(USIZE_SIZE.try_into()?);
+        handle.read_exact(&mut size_buf).await?;
+        let content_len: usize = usize::from_be_bytes(size_buf);
+
+        // then read the content itself
+        let mut data: Vec<u8> = vec![0; content_len];
+        handle = reader.take(content_len.try_into()?);
+        handle.read_exact(&mut data).await?;
+        let status = Self::from_bytes(&data)?;
+        Ok(status)
+    }
+
+    /// Sends one StatusUpdate to an AsyncWrite instance.
     pub async fn async_send_to<T: AsyncWrite + Unpin>(
         &self,
         writer: &mut T,

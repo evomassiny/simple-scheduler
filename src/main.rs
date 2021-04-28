@@ -10,9 +10,12 @@ extern crate serde_json;
 extern crate sqlx;
 
 pub mod tasks;
+mod listener;
+
+use std::path::{Path,PathBuf};
 
 use dotenv::dotenv;
-use rocket::State;
+use rocket::{State,tokio};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use tasks::TaskHandle;
@@ -23,18 +26,30 @@ async fn index() -> &'static str {
 }
 
 #[get("/spawn")]
-async fn spawn(pool: State<'_, SqlitePool>) -> String {
-    let cmd: String = "sleep 60 && echo $(date)".to_string();
+async fn spawn(pool: State<'_, SqlitePool>, hypervisor_sock: State<'_, PathBuf>) -> String {
+    // fetch hypervisor socket path
+    let sock = Some(hypervisor_sock.inner().clone());
+    // fetch database connection
     let mut conn = pool.acquire().await.unwrap();
-    let query_result = sqlx::query("INSERT INTO tasks (name, command) VALUES (?, ?)")
-        .bind("")
+
+    // build task DB object and get its id
+    let cmd: String = "sleep 10 && echo $(date)".to_string();
+    let query_result = sqlx::query("INSERT INTO tasks (command) VALUES (?)")
         .bind(&cmd)
         .execute(&mut conn)
         .await
         .expect("Could not send request");
+    let task_id = query_result.last_insert_rowid();
 
-    match TaskHandle::spawn(&cmd, query_result.last_insert_rowid()).await {
+    // spawn the task
+    match TaskHandle::spawn(&cmd, task_id, sock).await {
         Ok(task) => {
+            // set the task handle
+            let _ = sqlx::query("INSERT INTO tasks (handle) VALUES (?) WHERE id = ?")
+                .bind(&task.directory.clone().into_os_string().to_string_lossy().to_string())
+                .bind(&task_id)
+                .execute(&mut conn)
+                .await;
             let _ = task.start().await.expect("Could not start task");
             let status = task.get_status().await.expect("Could not get status");
             let pid = task.get_pid().await.expect("could not get pid");
@@ -47,15 +62,28 @@ async fn spawn(pool: State<'_, SqlitePool>) -> String {
 #[rocket::main]
 async fn main() {
     dotenv().expect("Failed reading .env");
-    let url = std::env::var("DATABASE_URL").expect("No DATABASE_URL environment variable set");
     // Build database connection pool
+    let url = std::env::var("DATABASE_URL").expect("No DATABASE_URL environment variable set");
     let pool = SqlitePoolOptions::new()
         .max_connections(16)
         .connect(&url)
         .await
         .expect("Could not connect to database.");
+
+    // launch process update listener loop
+    let hypervisor_socket = std::env::var("HYPERVISOR_SOCKET_PATH")
+        .expect("No HYPERVISOR_SOCKET_PATH environment variable set");
+    let socket_path = Path::new(&hypervisor_socket).to_path_buf();
+    let pool_clone = pool.clone();
+    tokio::task::spawn(async move {
+        let _ = listener::listen_for_status_update(pool_clone, socket_path).await;
+    });
+
+    // launch HTTP server
+    let socket_path = Path::new(&hypervisor_socket).to_path_buf();
     let result = rocket::build()
         .manage(pool)
+        .manage(socket_path)
         .mount("/", routes![index, spawn])
         .launch()
         .await;

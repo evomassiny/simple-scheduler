@@ -1,7 +1,7 @@
 use crate::tasks::handle::TaskHandle;
 use crate::tasks::pipe::Fence;
 use crate::tasks::query::{Query, Sendable};
-use crate::tasks::task_status::TaskStatus;
+use crate::tasks::task_status::{StatusUpdateMsg,TaskStatus};
 use nix::{
     sys::{
         epoll::{epoll_create, epoll_ctl, epoll_wait, EpollEvent, EpollFlags, EpollOp},
@@ -77,10 +77,15 @@ impl Monitor {
         Ok(())
     }
 
+    /// connect to the hypervisor socket and send a status update
     fn notify_hypervisor(&self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref hypervisor_socket) = self.hypervisor_socket {
             let mut stream = UnixStream::connect(hypervisor_socket)?;
-            let _ = self.status.send_to(&mut stream)?;
+            let msg = StatusUpdateMsg {
+                task_handle: self.handle.directory.clone(),
+                status: self.status.clone(),
+            };
+            let _ = msg.send_to(&mut stream)?;
             stream.shutdown(std::net::Shutdown::Write)?;
         }
         Ok(())
@@ -100,7 +105,6 @@ impl Monitor {
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // TODO:
         // * notify the hypervisor when the child terminates using the `handle.monitor_socket`
-        // * setup command parsing (if needed)
 
         // create the Unix socket
         let listener = UnixListener::bind(&self.handle.monitor_socket()).map_err(|e| {
@@ -145,7 +149,7 @@ impl Monitor {
         let mut streams_by_fd: HashMap<RawFd, UnixStream> = HashMap::new();
         let mut streams = listener.incoming();
 
-        // release the spanwer process
+        // release the spawner process
         if let Some(fence) = self.spawn_fence.take() {
             fence.release_waiter()?;
         }

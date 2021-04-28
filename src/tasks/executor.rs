@@ -4,7 +4,7 @@ use nix::{
     unistd::{chdir, execv, fork, getpid, setsid, ForkResult, Pid},
 };
 use rocket::tokio::task::spawn_blocking;
-use std::{ffi::CString, os::unix::io::RawFd};
+use std::{ffi::CString, os::unix::io::RawFd, path::PathBuf};
 
 use crate::tasks::monitor::Monitor;
 use crate::tasks::handle::TaskHandle;
@@ -34,7 +34,7 @@ impl TaskHandle {
      *  SAFETY: This method uses unsafe unix calls to spawn the process
      *  **as a daemon process**, so it can outlive the caller process.
      */
-    fn spawn_blocking(cmd: &str, id: i64) -> Result<Self, Box<dyn std::error::Error>> {
+    fn spawn_blocking(cmd: &str, id: i64, hypervisor_sock: Option<PathBuf>) -> Result<Self, Box<dyn std::error::Error>> {
         // create process handle (holds path to process related files)
         let mut handle = Self::from_task_id(id);
         handle
@@ -131,7 +131,7 @@ impl TaskHandle {
                                         task: child,
                                         status: TaskStatus::Pending,
                                         handle,
-                                        hypervisor_socket: None,
+                                        hypervisor_socket: hypervisor_sock,
                                     };
 
                                     if let Err(e) = monitor.run() {
@@ -178,12 +178,12 @@ impl TaskHandle {
      *
      *  see https://www.freedesktop.org/software/systemd/man/daemon.html
      */
-    pub async fn spawn(cmd: &str, id: i64) -> Result<Self, String> {
+    pub async fn spawn(cmd: &str, id: i64, hypervisor_sock: Option<PathBuf>) -> Result<Self, String> {
         let command: String = String::from(cmd);
         // wrap the blocking function into its own thread, to avoid messing
         // with the current executor
         spawn_blocking(move || {
-            Self::spawn_blocking(&command, id)
+            Self::spawn_blocking(&command, id, hypervisor_sock)
                 .map_err(|e| format!("Could not spawn daemon task: '{}'", e))
         })
         .await
