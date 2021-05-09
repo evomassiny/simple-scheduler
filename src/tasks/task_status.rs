@@ -1,4 +1,4 @@
-use crate::tasks::query::ByteSerializabe;
+use crate::tasks::query::{ByteSerializabe, async_read_from, async_send_to};
 use nix::{libc, sys::signalfd::siginfo};
 use rocket::tokio::{
     fs::File,
@@ -80,20 +80,7 @@ impl TaskStatus {
     pub async fn async_read_from<T: AsyncRead + Unpin>(
         reader: &mut T,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        const USIZE_SIZE: usize = std::mem::size_of::<usize>();
-        let mut size_buf: [u8; USIZE_SIZE] = [0; USIZE_SIZE];
-
-        // first read the content size
-        let mut handle = reader.take(USIZE_SIZE.try_into()?);
-        handle.read_exact(&mut size_buf).await?;
-        let content_len: usize = usize::from_be_bytes(size_buf);
-
-        // then read the content itself
-        let mut data: Vec<u8> = vec![0; content_len];
-        handle = reader.take(content_len.try_into()?);
-        handle.read_exact(&mut data).await?;
-        let status = Self::from_bytes(&data)?;
-        Ok(status)
+        async_read_from(reader).await
     }
 
     /// Sends one TaskStatus to an AsyncWrite instance.
@@ -101,13 +88,7 @@ impl TaskStatus {
         &self,
         writer: &mut T,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut bytes: Vec<u8> = self.to_bytes()?;
-        let mut msg: Vec<u8> = Vec::new();
-        msg.extend_from_slice(&bytes.len().to_be_bytes());
-        msg.append(&mut bytes);
-        writer.write_all(&msg).await?;
-        writer.flush().await?;
-        Ok(())
+        async_send_to(self, writer).await
     }
 
     /// return an integer representation of Self
@@ -135,20 +116,7 @@ impl StatusUpdateMsg {
     pub async fn async_read_from<T: AsyncRead + Unpin>(
         reader: &mut T,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        const USIZE_SIZE: usize = std::mem::size_of::<usize>();
-        let mut size_buf: [u8; USIZE_SIZE] = [0; USIZE_SIZE];
-
-        // first read the content size
-        let mut handle = reader.take(USIZE_SIZE.try_into()?);
-        handle.read_exact(&mut size_buf).await?;
-        let content_len: usize = usize::from_be_bytes(size_buf);
-
-        // then read the content itself
-        let mut data: Vec<u8> = vec![0; content_len];
-        handle = reader.take(content_len.try_into()?);
-        handle.read_exact(&mut data).await?;
-        let status = Self::from_bytes(&data)?;
-        Ok(status)
+        async_read_from(reader).await
     }
 
     /// Sends one StatusUpdate to an AsyncWrite instance.
@@ -156,12 +124,6 @@ impl StatusUpdateMsg {
         &self,
         writer: &mut T,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut bytes: Vec<u8> = self.to_bytes()?;
-        let mut msg: Vec<u8> = Vec::new();
-        msg.extend_from_slice(&bytes.len().to_be_bytes());
-        msg.append(&mut bytes);
-        writer.write_all(&msg).await?;
-        writer.flush().await?;
-        Ok(())
+        async_send_to(self, writer).await
     }
 }
