@@ -26,7 +26,7 @@ async fn index() -> &'static str {
 }
 
 #[get("/spawn")]
-async fn spawn(pool: State<'_, SqlitePool>, hypervisor_sock: State<'_, PathBuf>) -> String {
+async fn spawn(pool: &State<SqlitePool>, hypervisor_sock: &State<PathBuf>) -> String {
     // fetch hypervisor socket path
     let sock = Some(hypervisor_sock.inner().clone());
     // fetch database connection

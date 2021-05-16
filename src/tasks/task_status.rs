@@ -111,7 +111,6 @@ pub struct StatusUpdateMsg {
 }
 impl StatusUpdateMsg {
 
-
     /// Reads one StatusUpdate from an AsyncRead instance.
     pub async fn async_read_from<T: AsyncRead + Unpin>(
         reader: &mut T,
