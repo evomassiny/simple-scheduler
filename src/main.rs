@@ -1,4 +1,3 @@
-//#![feature(proc_macro_hygiene, decl_macro)]
 #[macro_use]
 extern crate rocket;
 extern crate rocket_contrib;
@@ -10,6 +9,7 @@ extern crate serde_json;
 extern crate sqlx;
 
 pub mod tasks;
+pub mod workflows;
 mod listener;
 
 use std::path::{Path,PathBuf};

@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use rocket::tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

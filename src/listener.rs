@@ -3,7 +3,7 @@ use rocket::tokio::{
     net::{UnixListener, UnixStream},
 };
 use crate::tasks::{TaskStatus, StatusUpdateMsg};
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::SqlitePool;
 use std::path::PathBuf;
 use std::error::Error;
 
