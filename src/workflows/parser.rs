@@ -106,5 +106,7 @@ fn test_deserialization() {
 </job>"#;
 
     let job: Job = from_reader(JOB_STR.as_bytes()).unwrap();
+    assert_eq!(job.name, String::from("job-name"));
+    assert_eq!(job.task_flow.tasks[0].name, String::from("A"));
     eprintln!("{:#?}", job);
 }

@@ -1,3 +1,4 @@
+mod graph;
 mod parser;
 
 mod parser_test {
