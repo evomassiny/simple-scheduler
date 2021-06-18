@@ -1,82 +1,95 @@
 use serde::Deserialize;
 use quick_xml::de::{from_str, from_reader, DeError};
 
+/**
+ * Those structs are deserialized by `quick_xml`,
+ * this is why they closely match the format/structure of a Workflow XML.
+ *
+ * Those types should only be used to create `crate::workflows::graph::WorkFlowGraph`s
+ */
+
 #[derive(Debug, Deserialize, PartialEq)]
-struct Info {
-    name: String,
-    value: String,
+pub struct Info {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct GenericInformation {
+pub struct GenericInformation {
     #[serde(rename = "info")]
-    infos: Vec<Info>,
+    pub infos: Vec<Info>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct Parallel {
-    numberOfNodes: usize,
+pub struct Parallel {
+    pub numberOfNodes: usize,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct Argument {
-    value: String,
+pub struct Argument {
+    pub value: String,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct Arguments {
+pub struct Arguments {
     #[serde(rename = "$value")]
-    arguments: Vec<Argument>,
+    pub arguments: Vec<Argument>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct StaticCommand {
-    value: String,
-    arguments: Arguments,
+pub struct StaticCommand {
+    pub value: String,
+    pub arguments: Arguments,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct NativeExecutable {
+pub struct NativeExecutable {
     #[serde(rename = "staticCommand")]
-    command: StaticCommand,
+    pub command: StaticCommand,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct TaskRef {
+pub struct TaskRef {
     #[serde(rename = "ref")]
-    task_ref: String,
+    pub task_ref: String,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct Dependencies {
+pub struct Dependencies {
     #[serde(rename = "task")]
-    tasks: Vec<TaskRef>,
+    pub tasks: Vec<TaskRef>,
 }
 
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct Task {
-    name: String,
-    runAsMe: bool,
-    genericInformation: GenericInformation,
-    dependencies: Option<Dependencies>,
-    parallel: Option<Parallel>,
+pub struct Task {
+    pub name: String,
+    pub runAsMe: bool,
+    pub genericInformation: GenericInformation,
+    pub dependencies: Option<Dependencies>,
+    pub parallel: Option<Parallel>,
     #[serde(rename = "nativeExecutable")]
-    executable: NativeExecutable,
+    pub executable: NativeExecutable,
 
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct TaskFlow {
+pub struct TaskFlow {
     #[serde(rename = "task")]
-    tasks: Vec<Task>,
+    pub tasks: Vec<Task>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct Job {
-    name: String,
+pub struct Job {
+    pub name: String,
     #[serde(rename = "taskFlow")]
-    task_flow: TaskFlow,
+    pub task_flow: TaskFlow,
+}
+
+impl Job {
+    pub fn from_str(job_str: &str) -> Result<Self, String>  {
+        from_reader(job_str.as_bytes()).map_err(|e| format!("Error while parsing job: {:?}", e))
+    }
 }
 
 #[test]
@@ -105,7 +118,7 @@ fn test_deserialization() {
   </taskFlow>
 </job>"#;
 
-    let job: Job = from_reader(JOB_STR.as_bytes()).unwrap();
+    let job: Job = Job::from_str(JOB_STR).unwrap();
     assert_eq!(job.name, String::from("job-name"));
     assert_eq!(job.task_flow.tasks[0].name, String::from("A"));
     eprintln!("{:#?}", job);
