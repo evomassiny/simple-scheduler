@@ -124,8 +124,9 @@ impl WorkFlowGraph {
             let mut dependencies: Vec<usize> = Vec::new();
             if let Some(deps) = &task.depends {
                 for dep in &deps.tasks {
-                    if let Some(task_idx) = name_to_idx.get(&dep.task_ref) {
-                        dependencies.push(*task_idx);
+                    match name_to_idx.get(&dep.task_ref) {
+                        Some(task_idx) => dependencies.push(*task_idx),
+                        None => return Err(format!("Bad task_ref: '{}'", &dep.task_ref).into()),
                     }
                 }
             }
