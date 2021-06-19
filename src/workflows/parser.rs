@@ -246,3 +246,4 @@ fn test_several_tasks_parsing() {
     // check dependencies
     assert_eq!(C_deps[0].name, String::from("A"));
 }
+
