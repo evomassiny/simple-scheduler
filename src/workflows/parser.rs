@@ -1,12 +1,15 @@
 use serde::Deserialize;
 use quick_xml::de::{from_str, from_reader, DeError};
 
+pub const CLUSTER_ATTRIBUTE_NAME: &str = "NODE_ACCESS_TOKEN";
+
 /**
  * Those structs are deserialized by `quick_xml`,
  * this is why they closely match the format/structure of a Workflow XML.
  *
  * Those types should only be used to create `crate::workflows::graph::WorkFlowGraph`s
  */
+
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Info {
