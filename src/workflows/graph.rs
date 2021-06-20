@@ -17,11 +17,23 @@ pub struct WorkFlowTask {
     pub executable_arguments: Vec<String>,
 }
 
+/// Represents a graph of `WorkFlowTask`,
+/// can be any kind of graph,
+/// but only cycle-free digraph are considered
+/// valid for the rest of the application.
+///
+/// This struct can validate such graphs.
+///
+/// NOTE: graph nodes (i.e tasks) are stored in a flat array,
+/// edges are stored in an other array.
 #[derive(Debug)]
 pub struct WorkFlowGraph {
     pub name: String,
     pub tasks: Vec<WorkFlowTask>,
-    /// indices of Task instances in `tasks`
+    /// Edges in the task graph:
+    ///  * each elements is a list of edge starting from `self.tasks[element_index]`.
+    ///  * each elements in that list is the task index (in self.tasks) where this edge is going
+    ///  to.
     pub (crate) dependency_indices: Vec<Vec<usize>>,
     /// index of each task (referenced by names) in `self.tasks`
     pub (crate) name_to_idx: HashMap<String, usize>,
@@ -44,7 +56,9 @@ impl WorkFlowGraph {
         Ok(tasks)
     }
 
-    fn is_task_dependancy_cycle_free(&self, task_idx: usize) -> Result<(), WorkflowError> {
+    /// Check for cycle in the dependency graph, 
+    /// of the `self.tasks[task_idx]` task.
+    fn is_task_dependency_cycle_free(&self, task_idx: usize) -> Result<(), WorkflowError> {
         if task_idx >= self.tasks.len() {
             return Err(WorkflowError::TaskDoesNotExist);
         }
@@ -101,12 +115,25 @@ impl WorkFlowGraph {
         // NOTE: this is suboptimal: we might check several time the cycle starting
         // from a task, if this task is in the dependency tree of several other tasks.
         for task_idx in 0..self.tasks.len() {
-            if let Err(WorkflowError::DependencyCycle) = self.is_task_dependancy_cycle_free(task_idx) {
+            if let Err(WorkflowError::DependencyCycle) = self.is_task_dependency_cycle_free(task_idx) {
                 return false;
             }
         }
         true
     }
+    
+    /// Check for name duplicates in task
+    pub fn are_task_names_unique(&self) -> bool {
+        let mut names = HashSet::new();
+        for task in &self.tasks {
+            if names.contains(&task.name) {
+                return false;
+            }
+            names.insert(task.name.clone());
+        }
+        true
+    }
+
 
 }
 
@@ -121,5 +148,19 @@ fn test_cycle_detection() {
         include_str!("../../test-data/workflow_with_cycle.xml")
     ).unwrap();
     assert_eq!(cycle_graph.is_cycle_free(), false);
+
+}
+
+#[test]
+fn test_name_uniqueness() {
+    let di_graph = WorkFlowGraph::from_str(
+        include_str!("../../test-data/workflow.xml")
+    ).unwrap();
+    assert_eq!(di_graph.are_task_names_unique(), true);
+
+    let invalid_graph = WorkFlowGraph::from_str(
+        include_str!("../../test-data/workflow_with_duplicated_task_names.xml")
+    ).unwrap();
+    assert_eq!(invalid_graph.are_task_names_unique(), false);
 
 }
