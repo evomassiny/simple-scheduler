@@ -3,6 +3,7 @@ use rocket::tokio::{
     net::{UnixListener, UnixStream},
 };
 use crate::tasks::{TaskStatus, StatusUpdateMsg};
+use crate::models::Status;
 use sqlx::sqlite::SqlitePool;
 use std::path::PathBuf;
 use std::error::Error;
@@ -18,7 +19,7 @@ async fn process_msg(stream: &mut UnixStream, pool: &SqlitePool) -> Result<(), B
         .to_string();
     let mut conn = pool.acquire().await?;
     sqlx::query("UPDATE tasks SET status = ? WHERE handle = ?")
-        .bind(&msg.status.as_i64())
+        .bind(Status::from_TaskStatus(&msg.status).as_u8())
         .bind(&task_handle)
         .execute(&mut conn)
         .await?;

@@ -10,6 +10,7 @@ extern crate sqlx;
 pub mod tasks;
 pub mod workflows;
 mod listener;
+mod models;
 
 use std::path::{Path,PathBuf};
 
@@ -58,6 +59,11 @@ async fn spawn(pool: &State<SqlitePool>, hypervisor_sock: &State<PathBuf>) -> St
     }
 }
 
+//#[post("/submit")]
+//async fn submit(pool: &State<SqlitePool>, hypervisor_sock: &State<PathBuf>) -> String {
+
+//}
+
 #[rocket::main]
 async fn main() {
     dotenv().expect("Failed reading .env");
@@ -84,6 +90,7 @@ async fn main() {
         .manage(pool)
         .manage(socket_path)
         .mount("/", routes![index, spawn])
+        //.mount("/rest", routes![submit])
         .launch()
         .await;
     assert!(result.is_ok());

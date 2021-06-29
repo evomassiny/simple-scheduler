@@ -3,7 +3,7 @@ CREATE TABLE jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
       name VARCHAR(256) NOT NULL,
       submit_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      status INTEGER NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5))
+      status TINYINT NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5))
       -- status variants:
       -- * 0 -> Pending,
       -- * 1 -> Stopped,
@@ -17,7 +17,7 @@ CREATE TABLE tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
       name VARCHAR(256) NOT NULL DEFAULT "",
       handle VARCHAR(512) NOT NULL DEFAULT "",
-      status INTEGER NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5)),
+      status TINYINT NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5)),
       command TEXT NOT NULL,
       job INTEGER,
       FOREIGN KEY(job) REFERENCES jobs(id) -- jobs pk constraint

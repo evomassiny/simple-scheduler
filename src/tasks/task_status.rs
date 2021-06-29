@@ -90,18 +90,6 @@ impl TaskStatus {
     ) -> Result<(), Box<dyn std::error::Error>> {
         async_send_to(self, writer).await
     }
-
-    /// return an integer representation of Self
-    pub fn as_i64(&self) -> i64 {
-        match *self {
-            Self::Pending => 0,
-            Self::Stopped => 1,
-            Self::Killed => 2,
-            Self::Failed => 3,
-            Self::Succeed => 4,
-            Self::Running => 5,
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
