@@ -1,7 +1,7 @@
 use nix::{
     libc::{exit, EXIT_SUCCESS, STDERR_FILENO, STDOUT_FILENO},
     sys::wait::waitpid,
-    unistd::{chdir, execv, fork, getpid, setsid, ForkResult, Pid},
+    unistd::{chdir, execv, fork, getpid, setsid, ForkResult},
 };
 use rocket::tokio::task::spawn_blocking;
 use std::{ffi::CString, os::unix::io::RawFd, path::PathBuf};

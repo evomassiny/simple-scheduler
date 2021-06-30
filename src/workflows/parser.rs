@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use serde::Deserialize;
 use quick_xml::de::{from_str, from_reader, DeError};
 use crate::workflows::graph::{
