@@ -1,12 +1,14 @@
-use chrono::NaiveDateTime;
 use crate::workflows::{WorkflowError, WorkFlowTask, WorkFlowGraph};
 use crate::tasks::TaskStatus;
 use async_trait::async_trait;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnection};
+use chrono::{DateTime, TimeZone, NaiveDateTime, Utc};
 use sqlx::Row;
 
 #[derive(Debug)]
 pub enum ModelError {
+    InvalidTaskName,
+    DependencyCycle,
     ModelNotFound,
     DBError,
 }
@@ -125,6 +127,25 @@ impl Model for Job {
 
 }
 
+impl Job {
+
+    /// Build a pending Job, use the current time
+    /// as `submit_time`. 
+    /// The returned instance is not saved in the database.
+    fn new(name: &str) -> Self {
+        Job {
+            id: None,
+            name: name.to_string(),
+            submit_time: NaiveDateTime::from_timestamp(
+                Utc::now().timestamp(), 
+                0,
+            ),
+            status: Status::Pending,
+        }
+    }
+
+}
+
 #[derive(Debug)]
 pub struct Task {
     pub id: Option<i64>,
@@ -227,16 +248,65 @@ impl Model for TaskDependency {
 
 }
 
-pub struct Workflow {
+
+/// A `Batch` is a graph of task to be executed.
+/// It is a composition of 3 kinds of models:
+/// * one `Job`: metadata about the whole Batch 
+/// * a collections of `Task`s, (commands to be executed)
+/// * a collections of `TaskDependency`s, which define the ordering
+/// constraints of the whole batch execution.
+pub struct Batch {
     pub job: Job,
+    /// One task == one bash command to execute == one node in the execution graph
     pub tasks: Vec<Task>,
+    /// execution graph edge
     pub dependencies: Vec<TaskDependency>,
 }
 
 
-impl Workflow {
-    pub fn from_graph(workflows: &WorkFlowGraph) -> Self {
-        unimplemented!();
+impl Batch {
+    pub fn from_graph(workflow: &WorkFlowGraph, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
+        // validate input
+        if !workflow.are_task_names_unique() {
+            return Err(ModelError::InvalidTaskName);
+        }
+        if !workflow.is_cycle_free() {
+            return Err(ModelError::DependencyCycle);
+        }
+
+        // Create and save Job
+        let mut job = Job::new(&workflow.name);
+        job.save(conn);
+        let job_id: i64 = job.id.ok_or(ModelError::ModelNotFound)?;
+
+        // create and save all tasks
+        let mut tasks: Vec<Task> = Vec::new();
+        for graph_task in &workflow.tasks {
+            let mut task = Task {
+                id: None,
+                name: graph_task.name.clone(),
+                status: Status::Pending,
+                handle: "".to_string(),
+                command: graph_task.command(),
+                job: job_id,
+            };
+            task.save(conn);
+            tasks.push(task);
+        }
+
+        // create and save TaskDependency
+        let mut dependencies: Vec<TaskDependency> = Vec::new();
+        for (task_idx, deps_ids) in workflow.dependency_indices.iter().enumerate() {
+            let child: i64 = tasks[task_idx].id().ok_or(ModelError::ModelNotFound)?;
+            for dep_idx in deps_ids {
+                let parent: i64 = tasks[*dep_idx].id().ok_or(ModelError::ModelNotFound)?;
+                let mut dependency = TaskDependency { id: None, child, parent };
+                dependency.save(conn);
+                dependencies.push(dependency);
+            }
+        }
+        Ok(Batch { job, tasks, dependencies })
     }
+
 }
 

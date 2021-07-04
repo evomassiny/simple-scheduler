@@ -17,6 +17,19 @@ pub struct WorkFlowTask {
     pub executable_arguments: Vec<String>,
 }
 
+impl WorkFlowTask {
+
+    /// Format executable and executable argument into one 
+    /// shell command.
+    pub fn command(&self) -> String {
+        let mut cmd = self.executable.clone();
+        for arg in &self.executable_arguments {
+            cmd += &format!(r#" "{}""#, &arg);
+        }
+        cmd
+    }
+}
+
 /// Represents a graph of `WorkFlowTask`,
 /// can be any kind of graph,
 /// but only cycle-free digraph are considered
