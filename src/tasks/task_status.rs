@@ -1,11 +1,10 @@
-use crate::tasks::query::{ByteSerializabe, async_read_from, async_send_to};
+use crate::tasks::query::{async_read_from, async_send_to};
 use nix::{libc, sys::signalfd::siginfo};
 use rocket::tokio::{
     fs::File,
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite},
 };
 use serde::{Deserialize, Serialize};
-use std::convert::TryInto;
 use std::path::{Path, PathBuf};
 
 /// Represents all the states of a monitoree process

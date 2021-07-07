@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 use serde::Deserialize;
-use quick_xml::de::{from_str, from_reader, DeError};
+use quick_xml::de::from_reader;
 use crate::workflows::graph::{
     WorkFlowGraph,WorkFlowTask
 };
@@ -120,7 +120,7 @@ impl WorkFlowGraph {
         }
 
         // Creates tasks
-        for (i, task) in job.task_flow.tasks.iter().enumerate() {
+        for task in job.task_flow.tasks.iter() {
             // collect dependencies
             let mut dependencies: Vec<usize> = Vec::new();
             if let Some(deps) = &task.depends {

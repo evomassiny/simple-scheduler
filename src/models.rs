@@ -1,9 +1,8 @@
-use crate::workflows::{WorkflowError, WorkFlowTask, WorkFlowGraph};
+use crate::workflows::WorkFlowGraph;
 use crate::tasks::TaskStatus;
 use async_trait::async_trait;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnection};
-use chrono::{DateTime, TimeZone, NaiveDateTime, Utc};
-use sqlx::Row;
+use sqlx::sqlite::SqliteConnection;
+use chrono::{NaiveDateTime, Utc};
 
 #[derive(Debug)]
 pub enum ModelError {
@@ -32,10 +31,6 @@ pub trait Model {
         Ok(())
     }
 }
-
-//#[async_trait]
-//impl Model {
-//}
 
 /// State of job/task
 #[derive(Debug)]
@@ -312,11 +307,11 @@ impl Batch {
 
 #[cfg(test)]
 mod test {
-    use crate::workflows::{WorkFlowGraph,WorkFlowTask,WorkflowError};
+    use crate::workflows::{WorkFlowGraph,WorkFlowTask};
     use sqlx::{SqliteConnection,Connection,Executor};
     use rocket::tokio;
     use std::collections::HashMap;
-    use crate::models::{Model, Batch, Job, Task, TaskDependency, Status, ModelError};
+    use crate::models::Batch;
 
     /// create an in-memory database, and execute the initial migration.
     async fn setup_in_memory_database() -> Result<SqliteConnection, Box<dyn std::error::Error>> {
@@ -325,7 +320,7 @@ mod test {
         Ok(conn)
     }
 
-    /// build a test graph With 2 tasks A and B, with B depending of A
+    /// build a test graph With 2 tasks A and B, with B depending on A
     fn build_test_workflow_graph() -> WorkFlowGraph {
         WorkFlowGraph {
             name: "test-job".to_string(),

@@ -1,9 +1,8 @@
 use rocket::tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{UnixListener, UnixStream},
 };
-use crate::tasks::{TaskStatus, StatusUpdateMsg};
-use crate::models::{Status,Task};
+use crate::tasks::StatusUpdateMsg;
+use crate::models::Task;
 use sqlx::sqlite::SqlitePool;
 use std::path::PathBuf;
 use std::error::Error;
