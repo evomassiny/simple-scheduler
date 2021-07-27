@@ -20,7 +20,7 @@ use std::{
     path::PathBuf,
 };
 
-/// Epoll will wait forever (unless an event happens) if this timout value is provided
+/// Epoll will wait forever (unless an event happens) if this timeout value is provided
 const WAIT_FOREVER_TIMEOUT: isize = -1;
 
 pub struct Monitor {
@@ -103,9 +103,6 @@ impl Monitor {
     /// * read data from the stream and interprets it as a command.
     /// * write reponse data into the same stream.
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // TODO:
-        // * notify the hypervisor when the child terminates using the `handle.monitor_socket`
-
         // create the Unix socket
         let listener = UnixListener::bind(&self.handle.monitor_socket()).map_err(|e| {
             format!(
@@ -156,7 +153,7 @@ impl Monitor {
 
         // start the event loop:
         'event_loop: while let Ok(event_count) =
-            epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT)
+            epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT) // wait for event completion
         {
             for event in events.iter().take(event_count) {
                 // fetch the data we've associated with the event (file descriptors)

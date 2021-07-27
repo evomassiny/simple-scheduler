@@ -1,5 +1,5 @@
 -- Your SQL goes here
-CREATE TABLE jobs (
+CREATE TABLE IF NOT EXISTS jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
       name VARCHAR(256) NOT NULL,
       submit_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -13,7 +13,7 @@ CREATE TABLE jobs (
       -- * 5 -> Running,
 );
 
-CREATE TABLE tasks (
+CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
       name VARCHAR(256) NOT NULL DEFAULT "",
       handle VARCHAR(512) NOT NULL DEFAULT "",
@@ -22,7 +22,7 @@ CREATE TABLE tasks (
       job INTEGER,
       FOREIGN KEY(job) REFERENCES jobs(id) -- jobs pk constraint
 );
-CREATE TABLE task_dependencies (
+CREATE TABLE IF NOT EXISTS task_dependencies (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
       child INTEGER,
       parent INTEGER,

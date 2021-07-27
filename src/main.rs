@@ -9,7 +9,8 @@ extern crate sqlx;
 
 pub mod tasks;
 pub mod workflows;
-mod listener;
+mod scheduling;
+//mod listener;
 mod models;
 
 use std::path::{Path,PathBuf};
@@ -19,6 +20,7 @@ use rocket::{State,tokio};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use tasks::TaskHandle;
+use scheduling::Scheduler;
 
 #[get("/")]
 async fn index() -> &'static str {
@@ -80,9 +82,8 @@ async fn main() {
         .expect("No HYPERVISOR_SOCKET_PATH environment variable set");
     let socket_path = Path::new(&hypervisor_socket).to_path_buf();
     let pool_clone = pool.clone();
-    tokio::task::spawn(async move {
-        let _ = listener::listen_for_status_update(pool_clone, socket_path).await;
-    });
+    let mut scheduler = Scheduler::new(socket_path, pool_clone);
+    scheduler.start();
 
     // launch HTTP server
     let socket_path = Path::new(&hypervisor_socket).to_path_buf();
