@@ -1,3 +1,5 @@
-mod scheduler;
+mod server;
+mod client;
 
-pub use crate::scheduling::scheduler::Scheduler;
+pub use crate::scheduling::server::SchedulerServer;
+pub use crate::scheduling::client::SchedulerClient;

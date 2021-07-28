@@ -8,13 +8,14 @@ use sqlx::sqlite::SqlitePool;
 use std::path::PathBuf;
 use std::error::Error;
 
+pub use crate::scheduling::client::SchedulerClient;
 
-pub struct Scheduler {
+pub struct SchedulerServer {
     socket: PathBuf,
     pool: SqlitePool,
 
 }
-impl Scheduler {
+impl SchedulerServer {
 
     pub fn new(socket: PathBuf, pool: SqlitePool) -> Self {
         Self { socket, pool }
@@ -32,6 +33,13 @@ impl Scheduler {
             .await
             .map_err(|e| format!("update error: {:?}", e))?;
         Ok(())
+    }
+
+    pub fn client(&self) -> SchedulerClient {
+        SchedulerClient { 
+            socket: self.socket.clone(),
+            pool: self.pool.clone(),
+        }
     }
 
     /// Listen on a unix domain socket for monitors status update messages.
