@@ -11,6 +11,7 @@ use rocket::tokio::{
 use std::path::{Path, PathBuf};
 
 
+/// Objects that can be serialized into bytes and parsed from bytes.
 pub trait ByteSerializabe {
     fn from_bytes(bytes: &[u8]) -> Result<Self, String>
     where
