@@ -1,4 +1,5 @@
-use crate::tasks::query::Query;
+//use crate::tasks::query::Query;
+use crate::messages::ExecutorQuery;
 use crate::tasks::task_status::TaskStatus;
 use rocket::tokio::{
     fs::metadata,
@@ -141,7 +142,7 @@ impl TaskHandle {
         let mut sock = UnixStream::connect(&self.monitor_socket())
             .await
             .map_err(|_| format!("Could not open socket {:?}", &self.monitor_socket()))?;
-        Query::Start.async_send_to(&mut sock)
+        ExecutorQuery::Start.async_send_to(&mut sock)
             .await
             .map_err(|_| "Could not send status request to socket".to_string().into())
     }
@@ -152,7 +153,7 @@ impl TaskHandle {
             return Err("task is not running".into());
         }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
-        Query::Kill.async_send_to(&mut sock).await
+        ExecutorQuery::Kill.async_send_to(&mut sock).await
     }
 
     /// ask the task to terminate
@@ -161,7 +162,7 @@ impl TaskHandle {
             return Err("task is not running".into());
         }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
-        Query::Terminate.async_send_to(&mut sock).await
+        ExecutorQuery::Terminate.async_send_to(&mut sock).await
     }
 
     /// return the status of the task
@@ -174,7 +175,7 @@ impl TaskHandle {
             return TaskStatus::async_from_file(&self.status_file()).await;
         }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
-        Query::GetStatus.async_send_to(&mut sock).await?;
+        ExecutorQuery::GetStatus.async_send_to(&mut sock).await?;
         TaskStatus::async_read_from(&mut sock).await
     }
 }

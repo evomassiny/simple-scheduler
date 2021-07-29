@@ -7,10 +7,10 @@ extern crate serde;
 extern crate serde_json;
 extern crate sqlx;
 
+mod messages;
 pub mod tasks;
 pub mod workflows;
 mod scheduling;
-//mod listener;
 mod models;
 
 use std::path::{Path,PathBuf};

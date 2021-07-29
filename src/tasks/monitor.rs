@@ -1,6 +1,7 @@
 use crate::tasks::handle::TaskHandle;
 use crate::tasks::pipe::Fence;
-use crate::tasks::query::{Query, Sendable};
+//use crate::tasks::query::{Query, Sendable};
+use crate::messages::{ExecutorQuery, Sendable};
 use crate::tasks::task_status::{StatusUpdateMsg,TaskStatus};
 use nix::{
     sys::{
@@ -64,15 +65,15 @@ impl Monitor {
 
     fn process_query(
         &mut self,
-        query: Query,
+        query: ExecutorQuery,
         stream: &mut UnixStream,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match query {
-            Query::Start => self.start()?,
-            Query::Kill => self.kill()?,
-            Query::Terminate => self.terminate()?,
-            Query::GetStatus => self.send_status(stream)?,
-            Query::SetHypervisorSocket(sock) => self.hypervisor_socket = sock,
+            ExecutorQuery::Start => self.start()?,
+            ExecutorQuery::Kill => self.kill()?,
+            ExecutorQuery::Terminate => self.terminate()?,
+            ExecutorQuery::GetStatus => self.send_status(stream)?,
+            ExecutorQuery::SetHypervisorSocket(sock) => self.hypervisor_socket = sock,
         }
         Ok(())
     }
@@ -193,7 +194,7 @@ impl Monitor {
                         // unregister the stream from the epoll
                         epoll_ctl(epoll_fd, EpollOp::EpollCtlDel, stream_fd, None)?;
                         // read queries from the stream, ignore failures
-                        match Query::read_from(&mut stream) {
+                        match ExecutorQuery::read_from(&mut stream) {
                             Ok(query) => {
                                 dbg!(&query);
                                 self.process_query(query, &mut stream)?;
