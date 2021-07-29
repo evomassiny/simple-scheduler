@@ -9,7 +9,8 @@ use std::{ffi::CString, os::unix::io::RawFd, path::PathBuf};
 use crate::tasks::monitor::Monitor;
 use crate::tasks::handle::TaskHandle;
 use crate::tasks::pipe::Fence;
-use crate::tasks::task_status::TaskStatus;
+//use crate::tasks::task_status::TaskStatus;
+use crate::messaging::TaskStatus;
 use crate::tasks::utils::{
     assign_file_to_fd, block_sigchild, close_everything_but, rename_current_process,
     reset_signal_handlers,

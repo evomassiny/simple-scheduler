@@ -7,7 +7,7 @@ extern crate serde;
 extern crate serde_json;
 extern crate sqlx;
 
-mod messages;
+mod messaging;
 pub mod tasks;
 pub mod workflows;
 mod scheduling;

@@ -2,7 +2,7 @@ use rocket::tokio::{
     net::{UnixListener, UnixStream},
     self,
 };
-use crate::tasks::StatusUpdateMsg;
+use crate::messaging::{StatusUpdateMsg, AsyncSendable};
 use crate::models::Task;
 use sqlx::sqlite::SqlitePool;
 use std::path::PathBuf;

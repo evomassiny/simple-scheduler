@@ -1,19 +1,15 @@
-use rocket::tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::io::{Read, Write};
-use std::marker::Sized;
-use std::path::PathBuf;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum ExecutorQuery {
-    Start,
-    Kill,
-    Terminate,
-    GetStatus,
-    SetHypervisorSocket(Option<PathBuf>),
-}
+use rocket::tokio::{
+    fs::File,
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+};
+use std::path::{Path, PathBuf};
+
 
 pub trait ByteSerializabe {
     fn from_bytes(bytes: &[u8]) -> Result<Self, String>
@@ -32,6 +28,7 @@ impl<SD: Serialize + DeserializeOwned + Sized> ByteSerializabe for SD {
     }
 }
 
+/// Object that can be read from or written to pipe/channel
 pub trait Sendable {
     fn read_from<T: Read>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>>
     where
@@ -68,53 +65,45 @@ impl<B: ByteSerializabe + Sized> Sendable for B {
     }
 }
 
-/// Read an `ByteSerializabe` struct from an AsyncRead instance.
-pub async fn async_read_from<T: AsyncRead + Unpin, R: ByteSerializabe>(
-        reader: &mut T,
-    ) -> Result<R, Box<dyn std::error::Error>> {
-    use std::mem::size_of;
-    let mut size_buf: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
-
-    // first read the content size
-    let mut handle = reader.take(size_of::<usize>().try_into()?);
-    handle.read_exact(&mut size_buf).await?;
-    let content_len: usize = usize::from_be_bytes(size_buf);
-
-    // then read the content itself
-    let mut data: Vec<u8> = vec![0; content_len];
-    handle = reader.take(content_len.try_into()?);
-    handle.read_exact(&mut data).await?;
-    let sendable = R::from_bytes(&data)?;
-    Ok(sendable)
+/// Object that can be asynchronaly read from or written to pipe/channel
+#[async_trait]
+pub trait AsyncSendable {
+    /// Reads one StatusUpdate from an AsyncRead instance.
+    async fn async_read_from<T: AsyncRead + Unpin + Send>(reader: &mut T,) -> Result<Self, Box<dyn std::error::Error>>
+    where
+        Self: Sized;
+    /// Sends one StatusUpdate to an AsyncWrite instance.
+    async fn async_send_to<T: AsyncWrite + Unpin + Send>( &self, writer: &mut T,) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-/// Sends an `ByteSerializabe` struct to an AsyncWrite instance.
-pub async fn async_send_to<T: AsyncWrite + Unpin, R: ByteSerializabe>(
-    obj: &R,
-    writer: &mut T,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut bytes: Vec<u8> = obj.to_bytes()?;
-    let mut msg: Vec<u8> = Vec::new();
-    msg.extend_from_slice(&bytes.len().to_be_bytes());
-    msg.append(&mut bytes);
-    writer.write_all(&msg).await?;
-    writer.flush().await?;
-    Ok(())
-}
+#[async_trait]
+impl<B: ByteSerializabe + Sized + Send + Sync> AsyncSendable for B {
+    /// Reads one ByteSerializabe from a AsyncReader
+    async fn async_read_from<T: AsyncRead + Unpin + Send>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
+        use std::mem::size_of;
+        let mut size_buf: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
 
-impl ExecutorQuery {
-    /// Reads one ExecutorQuery from an AsyncRead instance.
-    pub async fn async_read_from<T: AsyncRead + Unpin>(
-        reader: &mut T,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        async_read_from(reader).await
+        // first read the content size
+        let mut handle = reader.take(size_of::<usize>().try_into()?);
+        handle.read_exact(&mut size_buf).await?;
+        let content_len: usize = usize::from_be_bytes(size_buf);
+
+        // then read the content itself
+        let mut data: Vec<u8> = vec![0; content_len];
+        handle = reader.take(content_len.try_into()?);
+        handle.read_exact(&mut data).await?;
+        let sendable = Self::from_bytes(&data)?;
+        Ok(sendable)
     }
 
-    /// Sends one ExecutorQuery to an AsyncWrite instance.
-    pub async fn async_send_to<T: AsyncWrite + Unpin>(
-        &self,
-        writer: &mut T,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        async_send_to(self, writer).await
+    /// Send one ByteSerializabe into a AsyncWriter
+    async fn async_send_to<T: AsyncWrite + Unpin + Send>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
+        let mut bytes: Vec<u8> = self.to_bytes()?;
+        let mut msg: Vec<u8> = Vec::new();
+        msg.extend_from_slice(&bytes.len().to_be_bytes());
+        msg.append(&mut bytes);
+        writer.write_all(&msg).await?;
+        writer.flush().await?;
+        Ok(())
     }
 }

@@ -1,15 +1,16 @@
 use crate::tasks::handle::TaskHandle;
 use crate::tasks::pipe::Fence;
 //use crate::tasks::query::{Query, Sendable};
-use crate::messages::{ExecutorQuery, Sendable};
-use crate::tasks::task_status::{StatusUpdateMsg,TaskStatus};
+use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, StatusUpdateMsg};
+//use crate::tasks::task_status::{StatusUpdateMsg,TaskStatus};
 use nix::{
     sys::{
         epoll::{epoll_create, epoll_ctl, epoll_wait, EpollEvent, EpollFlags, EpollOp},
         signal::{kill, SigSet, Signal},
-        signalfd::{SfdFlags, SignalFd},
+        signalfd::{SfdFlags, SignalFd, siginfo},
     },
     unistd::{close, Pid},
+    libc,
 };
 use std::{
     collections::HashMap,
@@ -34,6 +35,7 @@ pub struct Monitor {
 }
 
 impl Monitor {
+
     /// start task process (release blocking Fence).
     fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(rel) = self.task_fence.take() {
@@ -223,3 +225,32 @@ impl Monitor {
         Ok(())
     }
 }
+
+
+impl TaskStatus {
+    /// Build a Status from the siginfo struct returned by reading a SIGCHLD signalfd
+    /// based on `man 2 sigaction`
+    pub fn from_siginfo(info: &siginfo) -> Result<Self, String> {
+        // check the signal that was bound to the signalfd this siginfo is the result of.
+        if info.ssi_signo != libc::SIGCHLD as u32 {
+            return Err("not a SIG_CHLD siginfo".to_string());
+        }
+        match info.ssi_code {
+            libc::CLD_EXITED => match info.ssi_status {
+                libc::EXIT_SUCCESS => Ok(Self::Succeed),
+                libc::EXIT_FAILURE => Ok(Self::Failed),
+                unknown => Err(format!(
+                    "Unkown return status code '{}' in siginfo",
+                    unknown
+                )),
+            },
+            libc::CLD_KILLED => Ok(Self::Killed),
+            libc::CLD_DUMPED => Ok(Self::Failed),
+            libc::CLD_TRAPPED => Ok(Self::Failed),
+            libc::CLD_STOPPED => Ok(Self::Stopped),
+            libc::CLD_CONTINUED => Ok(Self::Running),
+            unknown => Err(format!("Unkown status code '{}' in siginfo", unknown)),
+        }
+    }
+}
+
