@@ -53,7 +53,10 @@ impl TaskStatus {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct StatusUpdateMsg {
-    pub task_handle: PathBuf,
-    pub status: TaskStatus,
+pub enum ToSchedulerMsg {
+    StatusUpdate {
+        task_handle: PathBuf,
+        status: TaskStatus,
+    },
+    JobAppended,
 }

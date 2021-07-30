@@ -56,6 +56,7 @@ impl<B: ByteSerializabe + Sized> Sendable for B {
 
     /// Send one ExecutorQuery into a Writer
     fn send_to<T: Write + Read>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
+        // first read the msg object size, then the object itself.
         let mut bytes: Vec<u8> = self.to_bytes()?;
         let mut msg: Vec<u8> = Vec::new();
         msg.extend_from_slice(&bytes.len().to_be_bytes());
@@ -81,6 +82,7 @@ pub trait AsyncSendable {
 impl<B: ByteSerializabe + Sized + Send + Sync> AsyncSendable for B {
     /// Reads one ByteSerializabe from a AsyncReader
     async fn async_read_from<T: AsyncRead + Unpin + Send>(reader: &mut T) -> Result<Self, Box<dyn std::error::Error>> {
+        // first read the msg object size, then the object itself.
         use std::mem::size_of;
         let mut size_buf: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
 
@@ -99,6 +101,7 @@ impl<B: ByteSerializabe + Sized + Send + Sync> AsyncSendable for B {
 
     /// Send one ByteSerializabe into a AsyncWriter
     async fn async_send_to<T: AsyncWrite + Unpin + Send>(&self, writer: &mut T) -> Result<(), Box<dyn std::error::Error>> {
+        // write object size, then object
         let mut bytes: Vec<u8> = self.to_bytes()?;
         let mut msg: Vec<u8> = Vec::new();
         msg.extend_from_slice(&bytes.len().to_be_bytes());

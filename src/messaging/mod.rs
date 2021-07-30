@@ -4,4 +4,4 @@ mod sendable;
 
 pub use crate::messaging::to_executor::ExecutorQuery;
 pub use crate::messaging::sendable::{Sendable,AsyncSendable};
-pub use crate::messaging::to_scheduler::{TaskStatus, StatusUpdateMsg};
+pub use crate::messaging::to_scheduler::{TaskStatus, ToSchedulerMsg};

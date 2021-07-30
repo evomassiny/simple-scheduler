@@ -28,9 +28,10 @@ async fn index() -> &'static str {
 }
 
 #[get("/spawn")]
-async fn spawn(pool: &State<SqlitePool>, hypervisor_sock: &State<PathBuf>) -> String {
+async fn spawn(scheduler: &State<SchedulerClient>) -> String {
+    let SchedulerClient { socket, pool } = scheduler.inner();
     // fetch hypervisor socket path
-    let sock = Some(hypervisor_sock.inner().clone());
+    let sock = Some(socket.clone());
     // fetch database connection
     let mut conn = pool.acquire().await.unwrap();
 
@@ -62,9 +63,7 @@ async fn spawn(pool: &State<SqlitePool>, hypervisor_sock: &State<PathBuf>) -> St
 }
 
 //#[post("/submit")]
-//async fn submit(pool: &State<SqlitePool>, hypervisor_sock: &State<PathBuf>) -> String {
-
-//}
+//async fn submit(scheduler: &State<SchedulerClient> ) -> String { }
 
 #[rocket::main]
 async fn main() {
@@ -91,6 +90,7 @@ async fn main() {
     let result = rocket::build()
         .manage(pool)
         .manage(socket_path)
+        .manage(scheduler_client)
         .mount("/", routes![index, spawn])
         //.mount("/rest", routes![submit])
         .launch()

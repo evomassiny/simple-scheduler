@@ -1,8 +1,6 @@
 use crate::tasks::handle::TaskHandle;
 use crate::tasks::pipe::Fence;
-//use crate::tasks::query::{Query, Sendable};
-use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, StatusUpdateMsg};
-//use crate::tasks::task_status::{StatusUpdateMsg,TaskStatus};
+use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, ToSchedulerMsg};
 use nix::{
     sys::{
         epoll::{epoll_create, epoll_ctl, epoll_wait, EpollEvent, EpollFlags, EpollOp},
@@ -84,7 +82,7 @@ impl Monitor {
     fn notify_hypervisor(&self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref hypervisor_socket) = self.hypervisor_socket {
             let mut stream = UnixStream::connect(hypervisor_socket)?;
-            let msg = StatusUpdateMsg {
+            let msg = ToSchedulerMsg::StatusUpdate {
                 task_handle: self.handle.directory.clone(),
                 status: self.status.clone(),
             };

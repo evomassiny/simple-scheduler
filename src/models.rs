@@ -3,6 +3,8 @@ use crate::messaging::TaskStatus;
 use async_trait::async_trait;
 use sqlx::sqlite::SqliteConnection;
 use chrono::{NaiveDateTime, Utc};
+use crate::rocket::futures::TryStreamExt;
+use crate::sqlx::Row;
 
 #[derive(Debug)]
 pub enum ModelError {
@@ -10,7 +12,14 @@ pub enum ModelError {
     DependencyCycle,
     ModelNotFound,
     DBError(String),
+    ColumnError(String),
 }
+impl std::fmt::Display for ModelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ModelError {:?}", &self)
+    }
+}
+impl std::error::Error for ModelError {}
 
 /// trait shared by Database models,
 /// allow easier database manipulation.
@@ -33,7 +42,7 @@ pub trait Model {
 }
 
 /// State of job/task
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy)]
 pub enum Status {
     Pending,
     Stopped,
@@ -138,6 +147,30 @@ impl Job {
             status: Status::Pending,
         }
     }
+
+    /// query database and return all jobs with a status set to `status`
+    pub async fn select_by_status(status: &Status, conn: &mut SqliteConnection) -> Result<Vec<Self>, ModelError>{
+        let mut jobs: Vec<Self> = Vec::new();
+        let mut rows = sqlx::query("SELECT id, name, submit_time FROM jobs WHERE status = ?")
+            .bind(status.as_u8())
+            .fetch(conn);
+
+        while let Some(row) = rows.try_next().await.map_err(|e| ModelError::DBError(e.to_string()))? {
+            jobs.push(
+                Self {
+                    id: row.try_get("id")
+                        .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+                    name: row.try_get("name")
+                        .map_err(|_| ModelError::ColumnError("name".to_string()))?,
+                    status: *status,
+                    submit_time: row.try_get("submit_time")
+                        .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
+                }
+            );
+        }
+        Ok(jobs)
+    }
+
 
 }
 
@@ -260,6 +293,30 @@ pub struct Batch {
 
 
 impl Batch {
+
+    pub async fn from_shell_command(job_name: &str, task_name: &str, cmd: &str, conn: &mut SqliteConnection)
+        -> Result<Self, ModelError> {
+        let mut job = Job::new(&job_name);
+        let _ = job.save(conn).await?;
+        let job_id: i64 = job.id.ok_or(ModelError::ModelNotFound)?;
+
+        let mut task = Task {
+            id: None,
+            name: task_name.to_string(),
+            status: Status::Pending,
+            handle: "".to_string(),
+            command: cmd.to_string(),
+            job: job_id,
+        };
+        let _ = task.save(conn).await?;
+
+        Ok(Batch { 
+            job,
+            tasks: vec![task],
+            dependencies: vec![] 
+        })
+    }
+
     pub async fn from_graph(workflow: &WorkFlowGraph, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
         // validate input
         if !workflow.are_task_names_unique() {
