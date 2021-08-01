@@ -28,6 +28,9 @@ impl SchedulerServer {
         let mut conn = self.pool.acquire().await?;
         let pendings = Job::select_by_status(&Status::Pending, &mut conn)
             .await?;
+        for job in pendings {
+            ;
+        }
         // TODO:
         // select all pending/running job
         // for each, select all associated tasks

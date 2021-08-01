@@ -5,9 +5,11 @@ use sqlx::sqlite::SqliteConnection;
 use chrono::{NaiveDateTime, Utc};
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum ModelError {
+    InvalidTaskId,
     InvalidTaskName,
     DependencyCycle,
     ModelNotFound,
@@ -151,7 +153,7 @@ impl Job {
     /// query database and return all jobs with a status set to `status`
     pub async fn select_by_status(status: &Status, conn: &mut SqliteConnection) -> Result<Vec<Self>, ModelError>{
         let mut jobs: Vec<Self> = Vec::new();
-        let mut rows = sqlx::query("SELECT id, name, submit_time FROM jobs WHERE status = ?")
+        let mut rows = sqlx::query("SELECT id, name, submit_time FROM jobs WHERE status = ? SORT BY submit_time")
             .bind(status.as_u8())
             .fetch(conn);
 
@@ -170,7 +172,6 @@ impl Job {
         }
         Ok(jobs)
     }
-
 
 }
 
@@ -233,6 +234,38 @@ impl Task {
             .await
             .map_err(|_| ModelError::ModelNotFound)?;
         Ok(())
+    }
+    /// query database and return all tasks belonging to `job_id`
+    pub async fn select_by_job(job_id: i64, conn: &mut SqliteConnection) -> Result<Vec<Self>, ModelError>{
+        let mut tasks: Vec<Task> = Vec::new();
+        let mut rows = sqlx::query("SELECT id, name, status, handle, command FROM tasks WHERE job = ?")
+            .bind(&job_id)
+            .fetch(conn);
+
+        while let Some(row) = rows.try_next().await.map_err(|e| ModelError::DBError(e.to_string()))? {
+            let status_code = row.try_get("name")
+                .map_err(|_| ModelError::ColumnError("name".to_string()))?;
+            let status: Status::from_u8(status_code)
+                .map_err(|_| ModelError::ColumnError("status code".to_string()))?;
+
+            tasks.push(
+                Self {
+                    id: row.try_get("id")
+                        .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+                    name: row.try_get("name")
+                        .map_err(|_| ModelError::ColumnError("name".to_string()))?,
+                    submit_time: row.try_get("submit_time")
+                        .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
+                    handle: row.try_get("handle")
+                        .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
+                    command: row.try_get("command")
+                        .map_err(|_| ModelError::ColumnError("command".to_string()))?,
+                    job: job_id,
+                    status,
+                }
+            );
+        }
+        Ok(tasks)
     }
 }
 
@@ -359,6 +392,37 @@ impl Batch {
         }
         Ok(Batch { job, tasks, dependencies })
     }
+
+    pub fn from_job(job: Job, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
+        // select tasks by job id
+        let tasks = Task::select_by_job(job.id, &mut conn);
+        let mut dependencies: Vec<TaskDependency> = Vec::new();
+
+    }
+
+    pub async fn next_ready_task(&self, conn: &mut SqliteConnection) -> Result<Option<Task>, ModelError> {
+        // select tasks by job id
+        let tasks = Task::select_by_job(self.id, conn);
+        // build task index
+        let mut task_index: HashMap<i64, usize> = HashMap::new();
+        for (idx, task) in tasks.iter().enumerate() {
+            task_index.insert(&task.id, idx);
+        }
+        // find task with fulfilled dependencies
+        'ready_task_lookup: for task in task {
+            let parent_ids: Vec<i64> = /* TODO */;
+            for parent_id in parent_ids {
+                let parent = task_index.get(parent_id)
+                    .ok_or_else(|_| ModelError::InvalidTaskId)?;
+                if parent.status != Status::Finished {
+                    continue 'ready_task_lookup;
+                }
+            }
+            return Ok(Some(task));
+        }
+        Ok(None)
+    }
+
 
 }
 
