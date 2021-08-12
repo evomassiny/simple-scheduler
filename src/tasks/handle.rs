@@ -102,6 +102,10 @@ impl TaskHandle {
         Ok(())
     }
 
+    pub fn handle_string(&self) -> String {
+        self.directory.clone().into_os_string().to_string_lossy().to_string()
+    }
+
     /// See if a PID file exists to guess if the task is running or not.
     pub async fn is_running(&self) -> bool {
         match metadata(self.pid_file()).await {

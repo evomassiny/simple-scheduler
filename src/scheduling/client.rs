@@ -18,7 +18,7 @@ impl SchedulerClient {
     }
 
     pub async fn submit_command_job(&self, job_name: &str, task_name: &str, cmd: &str) 
-    -> Result<(), Box<std::error::Error>> {
+    -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = self.pool.acquire().await?;
         let batch = Batch::from_shell_command(
             job_name,

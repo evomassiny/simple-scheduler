@@ -2,13 +2,26 @@ use rocket::tokio::{
     net::{UnixListener, UnixStream},
     self,
 };
-use crate::messaging::{ToSchedulerMsg, AsyncSendable};
-use crate::models::{Task,Job,Status};
+use crate::messaging::{ToSchedulerMsg, AsyncSendable, TaskStatus};
+use crate::models::{Task,Batch,Job,Status};
+use crate::models::Model;
 use sqlx::sqlite::SqlitePool;
 use std::path::PathBuf;
 use std::error::Error;
+use crate::tasks::{TaskHandle};
 
 pub use crate::scheduling::client::SchedulerClient;
+
+#[derive(Debug)]
+pub enum SchedulerServerError {
+    NoSuchTask,
+}
+impl std::fmt::Display for SchedulerServerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SchedulerServerError {:?}", &self)
+    }
+}
+impl std::error::Error for SchedulerServerError {}
 
 pub struct SchedulerServer {
     socket: PathBuf,
@@ -25,18 +38,62 @@ impl SchedulerServer {
 
     /// Check if any job/task is pending, if so, launch them.
     async fn update_work_queue(&self) -> Result<(), Box<dyn Error>> {
-        let mut conn = self.pool.acquire().await?;
-        let pendings = Job::select_by_status(&Status::Pending, &mut conn)
-            .await?;
-        for job in pendings {
-            ;
-        }
-        // TODO:
         // select all pending/running job
         // for each, select all associated tasks
         //  * if all are finished set job as Finished
         //  * launch task with met dependancies
+        let mut conn = self.pool.acquire().await?;
+        // get running and pending jobs
+        let mut jobs = Job::select_by_status(&Status::Running, &mut conn)
+            .await?;
+        let pendings = Job::select_by_status(&Status::Pending, &mut conn)
+            .await?;
+        jobs.extend(pendings);
+        // get the first one with available task
+        for job in jobs {
+            let mut batch = Batch::from_job(job, &mut conn).await?;
+            if let Some(task) = batch.next_ready_task().await? {
+                // submit task
+                let task_id = task.id.ok_or(SchedulerServerError::NoSuchTask)?;
+                let handle = TaskHandle::spawn(&task.command, task_id, Some(self.socket.clone())).await?;
+                // update task
+                let mut running_task: Task = task.to_owned();
+                running_task.handle = handle.handle_string();
+                running_task.status = Status::Running;
+                let _ = running_task.update(&mut conn).await?;
+                // update job
+                batch.job.status = Status::Running;
+                let _ = batch.job.update(&mut conn).await?;
+                break;
+            }
+        }
 
+        Ok(())
+    }
+
+    /// fetch tasks by its handle, set its status, update its job status as well
+    async fn update_task_status(&self, handle: &str, task_status: &TaskStatus) -> Result<(), Box<dyn Error>> {
+        let mut conn = self.pool.acquire().await?;
+        let mut task = Task::get_by_handle(handle, &mut conn).await?;
+        task.status = Status::from_task_status(task_status);
+        let _ = task.update(&mut conn).await?;
+
+        let mut job = Job::get_by_id(task.job, &mut conn).await?;
+        if task.status.is_failure() {
+            job.status = task.status.clone();
+            let _ = job.update(&mut conn).await?;
+        } else {
+            for task in Task::select_by_job(task.job, &mut conn).await? {
+                if !task.status.is_finished() {
+                    // if there is remaining tasks
+                    // no need to update job staus
+                    return Ok(());
+
+                }
+            }
+            job.status = task.status.clone();
+            let _ = job.update(&mut conn).await?;
+        }
         Ok(())
     }
 
@@ -50,8 +107,8 @@ impl SchedulerServer {
                     .into_os_string()
                     .to_string_lossy()
                     .to_string();
-                let mut conn = self.pool.acquire().await?;
-                let _ = Task::select_by_handle_and_set_status(&task_handle, &status, &mut conn)
+                // update task and job status
+                let _ = self.update_task_status(&task_handle, &status)
                     .await
                     .map_err(|e| format!("update error: {:?}", e))?;
                 // a new task ended, means we could potentially launch the ones that

@@ -68,6 +68,28 @@ impl Status {
         }
     }
 
+    pub fn is_failure(&self) -> bool {
+        match *self {
+            Self::Pending => false,
+            Self::Stopped => true,
+            Self::Killed => true,
+            Self::Failed => true,
+            Self::Succeed => false,
+            Self::Running => false,
+        }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        match *self {
+            Self::Pending => false,
+            Self::Stopped => true,
+            Self::Killed => true,
+            Self::Failed => true,
+            Self::Succeed => true,
+            Self::Running => false,
+        }
+    }
+
     pub fn from_u8(value: u8) -> Result<Self, String> {
         match value {
             0 => Ok(Self::Pending),
@@ -92,7 +114,7 @@ impl Status {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct Job {
     pub id: Option<i64>,
     pub name: String,
@@ -172,10 +194,34 @@ impl Job {
         }
         Ok(jobs)
     }
+    
+    /// Select a Job by its id
+    pub async fn get_by_id(id: i64, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
+        let row = sqlx::query(
+                "SELECT id, name, status, submit_time FROM jobs WHERE id = ?"
+            ).bind(&id)
+            .fetch_one(conn)
+            .await
+            .map_err(|_| ModelError::ModelNotFound)?;
+
+        let status_code: u8 = row.try_get("status")
+            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
+        let status = Status::from_u8(status_code)
+            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
+        Ok(
+            Self {
+                id: row.try_get("id").map_err(|_| ModelError::ColumnError("id".to_string()))?,
+                name: row.try_get("name").map_err(|_| ModelError::ColumnError("name".to_string()))?,
+                status,
+                submit_time: row.try_get("submit_time")
+                    .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
+            }
+        )
+    }
 
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct Task {
     pub id: Option<i64>,
     pub name: String,
@@ -224,17 +270,31 @@ impl Model for Task {
 
 impl Task {
 
-    /// Select a Task by its handle, and update its status
-    pub async fn select_by_handle_and_set_status(handle: &str, status: &TaskStatus, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let status_code: u8 = Status::from_task_status(status).as_u8();
-        sqlx::query("UPDATE tasks SET status = ? WHERE handle = ?")
-            .bind(status_code)
-            .bind(handle)
-            .execute(conn)
+    /// Select a Task by its handle
+    pub async fn get_by_handle(handle: &str, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
+        let row = sqlx::query(
+                "SELECT id, name, status, handle, command, job FROM tasks WHERE handle = ?"
+            ).bind(&handle)
+            .fetch_one(conn)
             .await
             .map_err(|_| ModelError::ModelNotFound)?;
-        Ok(())
+
+        let status_code: u8 = row.try_get("status")
+            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
+        let status = Status::from_u8(status_code)
+            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
+        Ok(
+            Self {
+                id: row.try_get("id").map_err(|_| ModelError::ColumnError("id".to_string()))?,
+                name: row.try_get("name").map_err(|_| ModelError::ColumnError("name".to_string()))?,
+                status,
+                handle: row.try_get("handle").map_err(|_| ModelError::ColumnError("handle".to_string()))?,
+                command: row.try_get("command").map_err(|_| ModelError::ColumnError("command".to_string()))?,
+                job: row.try_get("job").map_err(|_| ModelError::ColumnError("job".to_string()))?,
+            }
+        )
     }
+
     /// query database and return all tasks belonging to `job_id`
     pub async fn select_by_job(job_id: i64, conn: &mut SqliteConnection) -> Result<Vec<Self>, ModelError>{
         let mut tasks: Vec<Task> = Vec::new();
@@ -245,7 +305,7 @@ impl Task {
         while let Some(row) = rows.try_next().await.map_err(|e| ModelError::DBError(e.to_string()))? {
             let status_code = row.try_get("name")
                 .map_err(|_| ModelError::ColumnError("name".to_string()))?;
-            let status: Status::from_u8(status_code)
+            let status = Status::from_u8(status_code)
                 .map_err(|_| ModelError::ColumnError("status code".to_string()))?;
 
             tasks.push(
@@ -254,8 +314,6 @@ impl Task {
                         .map_err(|_| ModelError::ColumnError("id".to_string()))?,
                     name: row.try_get("name")
                         .map_err(|_| ModelError::ColumnError("name".to_string()))?,
-                    submit_time: row.try_get("submit_time")
-                        .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
                     handle: row.try_get("handle")
                         .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
                     command: row.try_get("command")
@@ -271,9 +329,10 @@ impl Task {
 
 
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct TaskDependency {
     pub id: Option<i64>,
+    pub job: i64,
     pub child: i64,
     pub parent: i64,
 }
@@ -281,9 +340,10 @@ pub struct TaskDependency {
 #[async_trait]
 impl Model for TaskDependency {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let _query_result = sqlx::query("UPDATE task_dependencies VALUES child = ?, parent = ? WHERE id = ?")
+        let _query_result = sqlx::query("UPDATE task_dependencies VALUES child = ?, parent = ?, job = ? WHERE id = ?")
             .bind(&self.child)
             .bind(&self.parent)
+            .bind(&self.job)
             .bind(self.id.ok_or(ModelError::ModelNotFound)?)
             .execute(conn)
             .await
@@ -292,7 +352,8 @@ impl Model for TaskDependency {
     }
 
     async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError>{
-        let query_result = sqlx::query("INSERT INTO task_dependencies (child, parent) VALUES (?, ?)")
+        let query_result = sqlx::query("INSERT INTO task_dependencies (job, child, parent) VALUES (?, ?, ?)")
+            .bind(&self.job)
             .bind(&self.child)
             .bind(&self.parent)
             .execute(conn)
@@ -307,6 +368,32 @@ impl Model for TaskDependency {
         self.id
     }
 
+}
+
+impl TaskDependency {
+    
+    /// query database and return all task dependencies belonging to `job_id`
+    pub async fn select_by_job(job_id: i64, conn: &mut SqliteConnection) -> Result<Vec<Self>, ModelError>{
+        let mut dependencies: Vec<Self> = Vec::new();
+        let mut rows = sqlx::query("SELECT id, child, parent, command FROM task_dependencies WHERE job = ?")
+            .bind(&job_id)
+            .fetch(conn);
+
+        while let Some(row) = rows.try_next().await.map_err(|e| ModelError::DBError(e.to_string()))? {
+            dependencies.push(
+                Self {
+                    id: row.try_get("id")
+                        .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+                    child: row.try_get("child")
+                        .map_err(|_| ModelError::ColumnError("name".to_string()))?,
+                    parent: row.try_get("parent")
+                        .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
+                    job: job_id,
+                }
+            );
+        }
+        Ok(dependencies)
+    }
 }
 
 
@@ -343,7 +430,7 @@ impl Batch {
         };
         let _ = task.save(conn).await?;
 
-        Ok(Batch { 
+        Ok(Self { 
             job,
             tasks: vec![task],
             dependencies: vec![] 
@@ -385,45 +472,58 @@ impl Batch {
             let child: i64 = tasks[task_idx].id().ok_or(ModelError::ModelNotFound)?;
             for dep_idx in deps_ids {
                 let parent: i64 = tasks[*dep_idx].id().ok_or(ModelError::ModelNotFound)?;
-                let mut dependency = TaskDependency { id: None, child, parent };
+                let mut dependency = TaskDependency { id: None, child, parent, job: job_id };
                 let _ = dependency.save(conn).await?;
                 dependencies.push(dependency);
             }
         }
-        Ok(Batch { job, tasks, dependencies })
+        Ok(Self { job, tasks, dependencies })
     }
 
-    pub fn from_job(job: Job, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
+    pub async fn from_job(job: Job, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
         // select tasks by job id
-        let tasks = Task::select_by_job(job.id, &mut conn);
-        let mut dependencies: Vec<TaskDependency> = Vec::new();
-
+        let tasks = Task::select_by_job(job.id.ok_or(ModelError::ModelNotFound)?, conn).await?;
+        let dependencies = TaskDependency::select_by_job(job.id.ok_or(ModelError::ModelNotFound)?, conn).await?;
+        Ok(Self { job, tasks, dependencies })
     }
 
-    pub async fn next_ready_task(&self, conn: &mut SqliteConnection) -> Result<Option<Task>, ModelError> {
-        // select tasks by job id
-        let tasks = Task::select_by_job(self.id, conn);
+    pub async fn next_ready_task<'a,'b>(&'a self) -> Result<Option<&'b Task>, ModelError> where 'a: 'b {
         // build task index
         let mut task_index: HashMap<i64, usize> = HashMap::new();
-        for (idx, task) in tasks.iter().enumerate() {
-            task_index.insert(&task.id, idx);
+        for (idx, task) in self.tasks.iter().enumerate() {
+            task_index.insert(task.id.ok_or(ModelError::ModelNotFound)?, idx);
+        }
+        // build task dependencies index
+        let mut dependencies_index: HashMap<i64, Vec<i64>> = HashMap::new();
+        for dependency in self.dependencies.iter() {
+            match dependencies_index.get_mut(&dependency.child) {
+                // append to existing vec
+                Some(deps) => deps.push(dependency.parent),
+                // insert new vec
+                None => {
+                    let _ = dependencies_index.insert(dependency.child, vec![dependency.parent]);
+                },
+            }
         }
         // find task with fulfilled dependencies
-        'ready_task_lookup: for task in task {
-            let parent_ids: Vec<i64> = /* TODO */;
-            for parent_id in parent_ids {
-                let parent = task_index.get(parent_id)
-                    .ok_or_else(|_| ModelError::InvalidTaskId)?;
-                if parent.status != Status::Finished {
-                    continue 'ready_task_lookup;
+        'ready_task_lookup: for task in self.tasks.iter() {
+            let task_id = task.id.ok_or(ModelError::InvalidTaskId)?;
+            // iter dependencies
+            if let Some(parent_ids) = dependencies_index.get(&task_id) {
+                for parent_id in parent_ids {
+                    let idx = task_index.get(parent_id)
+                        .ok_or(ModelError::InvalidTaskId)?;
+                    let parent = &self.tasks[*idx];
+                    /* TODO handle failed states */
+                    if !parent.status.is_finished() {
+                        continue 'ready_task_lookup;
+                    }
                 }
             }
             return Ok(Some(task));
         }
         Ok(None)
     }
-
-
 }
 
 #[cfg(test)]

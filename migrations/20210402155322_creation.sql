@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS task_dependencies (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
       child INTEGER,
       parent INTEGER,
+      job INTEGER,
       FOREIGN KEY(child) REFERENCES tasks(id), -- tasks pk constraint
       FOREIGN KEY(parent) REFERENCES tasks(id) -- tasks pk constraint
+      FOREIGN KEY(job) REFERENCES jobs(id) -- tasks pk constraint
 );
