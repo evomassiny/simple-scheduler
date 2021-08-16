@@ -125,7 +125,7 @@ pub struct Job {
 #[async_trait]
 impl Model for Job {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let _query_result = sqlx::query("UPDATE jobs VALUES name = ?, submit_time = ?, status = ? WHERE id = ?")
+        let _query_result = sqlx::query("UPDATE jobs SET name = ?, submit_time = ?, status = ? WHERE id = ?")
             .bind(&self.name)
             .bind(&self.submit_time.format("%Y-%m-%d %H:%M:%S").to_string())
             .bind(self.status.as_u8())
@@ -175,7 +175,7 @@ impl Job {
     /// query database and return all jobs with a status set to `status`
     pub async fn select_by_status(status: &Status, conn: &mut SqliteConnection) -> Result<Vec<Self>, ModelError>{
         let mut jobs: Vec<Self> = Vec::new();
-        let mut rows = sqlx::query("SELECT id, name, submit_time FROM jobs WHERE status = ? SORT BY submit_time")
+        let mut rows = sqlx::query("SELECT id, name, submit_time FROM jobs WHERE status = ? ORDER BY submit_time")
             .bind(status.as_u8())
             .fetch(conn);
 
@@ -234,7 +234,7 @@ pub struct Task {
 #[async_trait]
 impl Model for Task {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let _query_result = sqlx::query("UPDATE tasks VALUES name = ?, status = ?, handle = ?, command = ?, job = ? WHERE id = ?")
+        let _query_result = sqlx::query("UPDATE tasks SET name = ?, status = ?, handle = ?, command = ?, job = ? WHERE id = ?")
             .bind(&self.name)
             .bind(self.status.as_u8())
             .bind(&self.handle)
@@ -303,8 +303,8 @@ impl Task {
             .fetch(conn);
 
         while let Some(row) = rows.try_next().await.map_err(|e| ModelError::DBError(e.to_string()))? {
-            let status_code = row.try_get("name")
-                .map_err(|_| ModelError::ColumnError("name".to_string()))?;
+            let status_code = row.try_get("status")
+                .map_err(|_| ModelError::ColumnError("status".to_string()))?;
             let status = Status::from_u8(status_code)
                 .map_err(|_| ModelError::ColumnError("status code".to_string()))?;
 
@@ -340,7 +340,7 @@ pub struct TaskDependency {
 #[async_trait]
 impl Model for TaskDependency {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let _query_result = sqlx::query("UPDATE task_dependencies VALUES child = ?, parent = ?, job = ? WHERE id = ?")
+        let _query_result = sqlx::query("UPDATE task_dependencies SET child = ?, parent = ?, job = ? WHERE id = ?")
             .bind(&self.child)
             .bind(&self.parent)
             .bind(&self.job)
@@ -375,7 +375,7 @@ impl TaskDependency {
     /// query database and return all task dependencies belonging to `job_id`
     pub async fn select_by_job(job_id: i64, conn: &mut SqliteConnection) -> Result<Vec<Self>, ModelError>{
         let mut dependencies: Vec<Self> = Vec::new();
-        let mut rows = sqlx::query("SELECT id, child, parent, command FROM task_dependencies WHERE job = ?")
+        let mut rows = sqlx::query("SELECT id, child, parent FROM task_dependencies WHERE job = ?")
             .bind(&job_id)
             .fetch(conn);
 
@@ -403,6 +403,7 @@ impl TaskDependency {
 /// * a collections of `Task`s, (commands to be executed)
 /// * a collections of `TaskDependency`s, which define the ordering
 /// constraints of the whole batch execution.
+#[derive(Debug)]
 pub struct Batch {
     pub job: Job,
     /// One task == one bash command to execute == one node in the execution graph

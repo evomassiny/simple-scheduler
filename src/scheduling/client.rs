@@ -25,7 +25,8 @@ impl SchedulerClient {
             task_name,
             cmd,
             &mut conn,
-        );
+        ).await;
+        println!("batch: {:?}", &batch);
 
         let mut to_hypervisor = self.connect_to_scheduler().await?;
         let _ = ToSchedulerMsg::JobAppended.async_send_to(&mut to_hypervisor).await?;

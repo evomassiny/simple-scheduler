@@ -29,37 +29,11 @@ async fn index() -> &'static str {
 
 #[get("/spawn")]
 async fn spawn(scheduler: &State<SchedulerClient>) -> String {
-    let SchedulerClient { socket, pool } = scheduler.inner();
-    // fetch hypervisor socket path
-    let sock = Some(socket.clone());
-    // fetch database connection
-    let mut conn = pool.acquire().await.unwrap();
-
     // build task DB object and get its id
-    let cmd: String = "sleep 10 && echo $(date)".to_string();
-    let query_result = sqlx::query("INSERT INTO tasks (command) VALUES (?)")
-        .bind(&cmd)
-        .execute(&mut conn)
-        .await
-        .expect("Could not send request");
-    let task_id = query_result.last_insert_rowid();
-
-    // spawn the task
-    match TaskHandle::spawn(&cmd, task_id, sock).await {
-        Ok(task) => {
-            // set the task handle
-            let _ = sqlx::query("INSERT INTO tasks (handle) VALUES (?) WHERE id = ?")
-                .bind(&task.directory.clone().into_os_string().to_string_lossy().to_string())
-                .bind(&task_id)
-                .execute(&mut conn)
-                .await;
-            let _ = task.start().await.expect("Could not start task");
-            let status = task.get_status().await.expect("Could not get status");
-            let pid = task.get_pid().await.expect("could not get pid");
-            format!("task '{:?}', spawned with PID: {}, {:?}", &task.directory, pid, status)
-        }
-        Err(error) => format!("Failed: {:?}", error),
-    }
+    let cmd: String = "sleep 30 && echo $(date)".to_string();
+    let scheduler = scheduler.inner();
+    scheduler.submit_command_job("command_job", "task", &cmd).await.expect("failed");
+    String::from("task successfully launched")
 }
 
 //#[post("/submit")]
