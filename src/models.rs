@@ -79,6 +79,13 @@ impl Status {
         }
     }
 
+    pub fn is_pending(&self) -> bool {
+        match *self {
+            Self::Pending => true,
+            _ => false,
+        }
+    }
+
     pub fn is_finished(&self) -> bool {
         match *self {
             Self::Pending => false,
@@ -508,6 +515,10 @@ impl Batch {
         }
         // find task with fulfilled dependencies
         'ready_task_lookup: for task in self.tasks.iter() {
+            // ignore running, of finished tasks
+            if ! task.status.is_pending() {
+                continue 'ready_task_lookup;
+            }
             let task_id = task.id.ok_or(ModelError::InvalidTaskId)?;
             // iter dependencies
             if let Some(parent_ids) = dependencies_index.get(&task_id) {

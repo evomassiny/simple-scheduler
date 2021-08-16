@@ -46,10 +46,8 @@ impl SchedulerServer {
         // get running and pending jobs
         let mut jobs = Job::select_by_status(&Status::Running, &mut conn)
             .await?;
-        println!("runnings {:?}", &jobs);
         let pendings = Job::select_by_status(&Status::Pending, &mut conn)
             .await?;
-        println!("pendings {:?}", &pendings);
         jobs.extend(pendings);
         // get the first one with available task
         for job in jobs {
@@ -66,7 +64,8 @@ impl SchedulerServer {
                 // update job
                 batch.job.status = Status::Running;
                 let _ = batch.job.update(&mut conn).await?;
-                break;
+                // start task
+                let _ = handle.start().await?;
             }
         }
 
