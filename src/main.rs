@@ -6,6 +6,7 @@ extern crate nix;
 extern crate serde;
 extern crate serde_json;
 extern crate sqlx;
+extern crate tempfile;
 
 mod messaging;
 pub mod tasks;
@@ -16,7 +17,7 @@ mod models;
 use std::path::{Path,PathBuf};
 
 use dotenv::dotenv;
-use rocket::{State,tokio};
+use rocket::{State,tokio,fs::TempFile};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use tasks::TaskHandle;
@@ -36,8 +37,16 @@ async fn spawn(scheduler: &State<SchedulerClient>) -> String {
     String::from("task successfully launched")
 }
 
-//#[post("/submit")]
-//async fn submit(scheduler: &State<SchedulerClient> ) -> String { }
+#[post("/submit", format = "application/xml", data="<uploaded_file>")]
+async fn submit(scheduler: &State<SchedulerClient>, mut uploaded_file: TempFile<'_>) -> String {
+    let scheduler = scheduler.inner();
+    match scheduler.submit_from_tempfile(&mut uploaded_file).await {
+        Ok(job_id) => format!("Job {:?} successfully created", &job_id),
+        Err(error) => format!("Failed to create job: {:?}", error),
+    }
+    
+}
+
 
 #[rocket::main]
 async fn main() {
@@ -65,8 +74,7 @@ async fn main() {
         .manage(pool)
         .manage(socket_path)
         .manage(scheduler_client)
-        .mount("/", routes![index, spawn])
-        //.mount("/rest", routes![submit])
+        .mount("/", routes![index, spawn, submit])
         .launch()
         .await;
     assert!(result.is_ok());

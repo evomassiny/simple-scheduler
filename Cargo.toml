@@ -19,8 +19,4 @@ serde_json = "*" # serialization to json
 bincode = "*" # serialization to bytes
 quick-xml = { version = "*", features = [ "serialize" ] }  # XML reader, with serde support
 async-trait = "*"
-
-#[dependencies.rocket_contrib]
-#git = "https://github.com/SergioBenitez/Rocket"
-#branch = "master"
-
+tempfile = "*"

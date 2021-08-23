@@ -113,9 +113,11 @@ impl TaskHandle {
                                     reset_signal_handlers().expect("failed to reset signals");
                                     // write pid to file
                                     handle.save_pid(getpid()).expect("failed to write PID file");
+                                    println!("waiting");
                                     task_fence
                                         .wait_for_signal()
                                         .expect("Waiting for 'GO/NO GO' failed.");
+                                    println!("go !");
                                     let _ = execv(&args[0], &args);
                                     unreachable!();
                                 }
