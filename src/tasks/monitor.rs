@@ -1,5 +1,5 @@
 use crate::tasks::handle::TaskHandle;
-use crate::tasks::pipe::Fence;
+use crate::tasks::pipe::Barrier;
 use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, ToSchedulerMsg};
 use nix::{
     sys::{
@@ -24,8 +24,8 @@ use std::{
 const WAIT_FOREVER_TIMEOUT: isize = -1;
 
 pub struct Monitor {
-    pub task_fence: Option<Fence>,
-    pub spawn_fence: Option<Fence>,
+    pub task_barrier: Option<Barrier>,
+    pub monitor_ready_barrier: Option<Barrier>,
     pub task: Pid,
     pub status: TaskStatus,
     pub handle: TaskHandle,
@@ -36,8 +36,8 @@ impl Monitor {
 
     /// start task process (release blocking Fence).
     fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(rel) = self.task_fence.take() {
-            rel.release_waiter()?;
+        if let Some(rel) = self.task_barrier.take() {
+            rel.release()?;
             self.status = TaskStatus::Running;
         }
         Ok(())
@@ -148,8 +148,8 @@ impl Monitor {
         let mut streams = listener.incoming();
 
         // release the spawner process
-        if let Some(fence) = self.spawn_fence.take() {
-            fence.release_waiter()?;
+        if let Some(barrier) = self.monitor_ready_barrier.take() {
+            barrier.release()?;
         }
 
         // start the event loop:

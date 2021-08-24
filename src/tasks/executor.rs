@@ -8,7 +8,7 @@ use std::{ffi::CString, os::unix::io::RawFd, path::PathBuf};
 
 use crate::tasks::monitor::Monitor;
 use crate::tasks::handle::TaskHandle;
-use crate::tasks::pipe::Fence;
+use crate::tasks::pipe::Barrier;
 //use crate::tasks::task_status::TaskStatus;
 use crate::messaging::TaskStatus;
 use crate::tasks::utils::{
@@ -43,8 +43,8 @@ impl TaskHandle {
             .map_err(|e| format!("can't create task process directory {:?}", e))?;
         // create fence to block the executor process, until the monitor
         // one decides to release it.
-        let task_fence = Fence::new()?;
-        let spawn_fence = Fence::new()?;
+        let task_barrier = Barrier::new()?;
+        let monitor_ready_barrier = Barrier::new()?;
 
         unsafe {
             // fork process
@@ -70,13 +70,9 @@ impl TaskHandle {
                             let _ = setsid().expect("Failed to detach");
 
                             // Close all files but stdin/stdout and pipes:
-                            let fd_to_keep: [RawFd; 6] = [
+                            let fd_to_keep: [RawFd; 2] = [
                                 STDERR_FILENO as RawFd,
                                 STDOUT_FILENO as RawFd,
-                                task_fence.write_end_fd(),
-                                task_fence.read_end_fd(),
-                                spawn_fence.write_end_fd(),
-                                spawn_fence.read_end_fd(),
                             ];
                             close_everything_but(&fd_to_keep[..]).expect("Could not close fd");
 
@@ -113,11 +109,8 @@ impl TaskHandle {
                                     reset_signal_handlers().expect("failed to reset signals");
                                     // write pid to file
                                     handle.save_pid(getpid()).expect("failed to write PID file");
-                                    println!("waiting");
-                                    task_fence
-                                        .wait_for_signal()
-                                        .expect("Waiting for 'GO/NO GO' failed.");
-                                    println!("go !");
+                                    // wait for a Start command
+                                    task_barrier.wait().expect("Waiting for 'GO/NO GO' failed.");
                                     let _ = execv(&args[0], &args);
                                     unreachable!();
                                 }
@@ -129,8 +122,8 @@ impl TaskHandle {
 
                                     // wait for child completion, and listen for request
                                     let mut monitor = Monitor {
-                                        task_fence: Some(task_fence),
-                                        spawn_fence: Some(spawn_fence),
+                                        task_barrier: Some(task_barrier),
+                                        monitor_ready_barrier: Some(monitor_ready_barrier),
                                         task: child,
                                         status: TaskStatus::Pending,
                                         handle,
@@ -163,7 +156,7 @@ impl TaskHandle {
                     // wait for child (so its not a zombie process)
                     let _ = waitpid(child, None);
                     // wait for the monitor to be ready before returning
-                    spawn_fence.wait_for_signal()?;
+                    monitor_ready_barrier.wait()?;
                     Ok(handle)
                 }
             }
