@@ -7,35 +7,6 @@ use nix::{
     errno::{errno,Errno},
 };
 
-struct Pipe {
-    pub read_end: UnixStream,
-    pub write_end: UnixStream,
-}
-impl Pipe {
-    pub fn new() -> Result<Self, std::io::Error> {
-        let (rx, tx) = UnixStream::pair()?;
-        rx.shutdown(std::net::Shutdown::Write)?;
-        tx.shutdown(std::net::Shutdown::Read)?;
-        Ok(Self {
-            read_end: rx,
-            write_end: tx,
-        })
-    }
-
-    pub fn close(&self) -> Result<(), std::io::Error> {
-        self.read_end.shutdown(std::net::Shutdown::Read)?;
-        self.write_end.shutdown(std::net::Shutdown::Write)?;
-        Ok(())
-    }
-}
-
-impl Drop for Pipe {
-    fn drop(&mut self) {
-        let _ = self.close();
-    }
-}
-
-
 /// Use this to block a process, until another one decides to release it.
 pub struct Barrier {
     semaphore_ptr: *mut libc::sem_t,
@@ -136,3 +107,57 @@ impl Drop for Barrier {
     }
 }
 
+#[test]
+fn test_barrier() {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use nix::unistd::{fork, ForkResult};
+    use std::{thread, time::Duration};
+
+    // build pipe 
+    let (mut rx, mut tx) = UnixStream::pair().expect("failed to build pipe");
+    // make it unidirectional
+    rx.shutdown(std::net::Shutdown::Write).expect("closing failed");
+    tx.shutdown(std::net::Shutdown::Read).expect("closing failed");
+    // remove any read time limit
+    rx.set_read_timeout(None).expect("fail to set pipe timeout");
+
+    // what we want to test
+    let parent_has_written_barrier = Barrier::new().unwrap();
+    let child_has_written_barrier = Barrier::new().unwrap();
+
+    // fork into 2 processes,
+    // then write data to the pipe from both processes
+    // use barriers to assert a certain ordering,
+    // and check the actual "sending" ordering by reading the pipe
+    unsafe {
+        match fork() {
+            Ok(ForkResult::Parent { .. }) => {
+                // sleep for a while (100 ms)
+                thread::sleep(Duration::from_millis(100));
+                // send "A"
+                tx.write(b"A").unwrap();
+                tx.flush().unwrap();
+                // allow child to proceed
+                parent_has_written_barrier.release().unwrap();
+                // wait for child completion
+                child_has_written_barrier.wait().unwrap();
+                // read pipe content, should be A then B
+                let mut data: [u8; 2] = [0u8; 2];
+                rx.read_exact(&mut data).expect("Failed to read pipe");
+                assert_eq!(&data, b"AB");
+                
+            },
+            Ok(ForkResult::Child) => {
+                // wait for parent
+                parent_has_written_barrier.wait().unwrap();
+                // send "B"
+                tx.write(b"B").unwrap();
+                tx.flush().unwrap();
+                // release parent
+                child_has_written_barrier.release().unwrap();
+            },
+            Err(e) => panic!("fork failed: {}", e),
+        }
+    }
+}

@@ -8,7 +8,7 @@ use std::{ffi::CString, os::unix::io::RawFd, path::PathBuf};
 
 use crate::tasks::monitor::Monitor;
 use crate::tasks::handle::TaskHandle;
-use crate::tasks::pipe::Barrier;
+use crate::tasks::ipc::Barrier;
 //use crate::tasks::task_status::TaskStatus;
 use crate::messaging::TaskStatus;
 use crate::tasks::utils::{

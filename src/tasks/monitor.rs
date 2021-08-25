@@ -1,5 +1,5 @@
 use crate::tasks::handle::TaskHandle;
-use crate::tasks::pipe::Barrier;
+use crate::tasks::ipc::Barrier;
 use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, ToSchedulerMsg};
 use nix::{
     sys::{

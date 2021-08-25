@@ -53,7 +53,7 @@ The whole spawning process is described as follows:
 </li>
 
 <li>
-    <p>the executor then waits for a starting signal. In the meantime the monitor notifies the hypervisor that it is ready to accept requests and
+    <p>the executor then waits for a signal to start the task. In the meantime the monitor notifies the hypervisor (using semapthore) that it is ready to accept requests and
     starts listening on its <em>monitor.sock</em> unix domain socket for any commands (start task request, status update, kill requests...).</p>
     <p><img src="doc/spawing-process/step-7.svg" width="500" height="100" /></p>
 </li>
@@ -64,7 +64,7 @@ The whole spawning process is described as follows:
 </li>
 
 <li>
-    <p>on receiving the "START" request, the monitor wakes the executor up.<p>
+    <p>on receiving the "START" request, the monitor wakes the executor up (also using semaphore).<p>
     <p><img src="doc/spawing-process/step-8-bis.svg" width="500" height="100" /></p>
 </li>
 

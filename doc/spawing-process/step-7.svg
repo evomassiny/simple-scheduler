@@ -27,7 +27,7 @@
 <path fill="none" stroke="#000000" stroke-width=".4" stroke-dasharray="5,2" d="M132.8841,-133.2684C144.1994,-135.6502 155.8739,-137.7087 167,-139 224.3925,-145.6611 239.6075,-145.6611 297,-139 309.8301,-137.5109 323.3894,-135.0017 336.2864,-132.1528"/>
 <polygon fill="#000000" stroke="#000000" stroke-width=".4" points="132.9703,-131.4968 127.7136,-132.1528 132.2321,-134.918 132.9703,-131.4968"/>
 <text text-anchor="middle" x="232" y="-161.8" font-family="Times,serif" font-size="14.00" fill="#000000">READY</text>
-<text text-anchor="middle" x="232" y="-146.8" font-family="Times,serif" font-size="14.00" fill="#000000">(shared pipe)</text>
+<text text-anchor="middle" x="232" y="-146.8" font-family="Times,serif" font-size="14.00" fill="#000000">(semaphore)</text>
 </g>
 <!-- tmp -->
 <!-- hypervisor&#45;&gt;tmp -->
