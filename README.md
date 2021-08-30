@@ -14,4 +14,4 @@ cargo build release
 ```
 
 # Internals
-[executor](/doc/executor)
+[executor](/doc/executor.md)
