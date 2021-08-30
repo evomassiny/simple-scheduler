@@ -74,7 +74,8 @@ async fn main() {
         .manage(pool)
         .manage(socket_path)
         .manage(scheduler_client)
-        .mount("/", routes![index, spawn, submit])
+        .mount("/rest/scheduler/", routes![spawn, submit])
+        .mount("/", routes![index])
         .launch()
         .await;
     assert!(result.is_ok());
