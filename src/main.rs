@@ -43,16 +43,12 @@ async fn main() {
     let hypervisor_socket = std::env::var("HYPERVISOR_SOCKET_PATH")
         .expect("No HYPERVISOR_SOCKET_PATH environment variable set");
     let socket_path = Path::new(&hypervisor_socket).to_path_buf();
-    let pool_clone = pool.clone();
-    let scheduler_server = SchedulerServer::new(socket_path, pool_clone);
+    let scheduler_server = SchedulerServer::new(socket_path, pool);
     let scheduler_client = scheduler_server.client();
     scheduler_server.start();
 
     // launch HTTP server
-    let socket_path = Path::new(&hypervisor_socket).to_path_buf();
     let result = rocket::build()
-        .manage(pool)
-        .manage(socket_path)
         .manage(scheduler_client)
         .mount(
             "/rest/scheduler/",
