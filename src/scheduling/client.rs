@@ -1,15 +1,11 @@
-use sqlx::sqlite::SqlitePool;
-use std::path::{PathBuf,Path};
-use crate::models::{Batch,ModelError};
-use crate::messaging::{ToSchedulerMsg, AsyncSendable};
+use crate::messaging::{AsyncSendable, ToSchedulerMsg};
+use crate::models::{Batch, ModelError};
 use crate::tokio::net::UnixStream;
 use crate::workflows::WorkFlowGraph;
-use rocket::tokio::{
-    self,
-    fs::File,
-    io::AsyncReadExt,
-};
 use rocket::fs::TempFile as RocketTempFile;
+use rocket::tokio::{self, fs::File, io::AsyncReadExt};
+use sqlx::sqlite::SqlitePool;
+use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 pub struct SchedulerClient {
@@ -18,7 +14,6 @@ pub struct SchedulerClient {
 }
 
 impl SchedulerClient {
-
     pub async fn connect_to_scheduler(&self) -> Result<UnixStream, String> {
         UnixStream::connect(&self.socket)
             .await
@@ -26,24 +21,28 @@ impl SchedulerClient {
     }
 
     /// Submit a Job with a single task: a shell command
-    pub async fn submit_command_job(&self, job_name: &str, task_name: &str, cmd: &str) 
-    -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn submit_command_job(
+        &self,
+        job_name: &str,
+        task_name: &str,
+        cmd: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = self.pool.acquire().await?;
-        let batch = Batch::from_shell_command(
-            job_name,
-            task_name,
-            cmd,
-            &mut conn,
-        ).await;
+        let batch = Batch::from_shell_command(job_name, task_name, cmd, &mut conn).await;
         println!("batch: {:?}", &batch);
 
         let mut to_hypervisor = self.connect_to_scheduler().await?;
-        let _ = ToSchedulerMsg::JobAppended.async_send_to(&mut to_hypervisor).await?;
+        let _ = ToSchedulerMsg::JobAppended
+            .async_send_to(&mut to_hypervisor)
+            .await?;
         Ok(())
     }
 
     /// parse a workflow file, and submit the parsed job
-    pub async fn submit_workflow(&self, workflow_path: &Path) -> Result<i64, Box<dyn std::error::Error>> {
+    pub async fn submit_workflow(
+        &self,
+        workflow_path: &Path,
+    ) -> Result<i64, Box<dyn std::error::Error>> {
         let mut conn = self.pool.acquire().await?;
 
         // read file content
@@ -59,7 +58,9 @@ impl SchedulerClient {
 
         // warn hypervisor that new jobs are available
         let mut to_hypervisor = self.connect_to_scheduler().await?;
-        let _ = ToSchedulerMsg::JobAppended.async_send_to(&mut to_hypervisor).await?;
+        let _ = ToSchedulerMsg::JobAppended
+            .async_send_to(&mut to_hypervisor)
+            .await?;
 
         // return job id
         let job_id = batch.job.id.ok_or(ModelError::ModelNotFound)?;
@@ -67,19 +68,21 @@ impl SchedulerClient {
     }
 
     /// parse a workflow file from uploaded data, then submit it
-    pub async fn submit_from_tempfile(&self, uploaded_file: &mut RocketTempFile<'_>)
-        -> Result<i64, Box<dyn std::error::Error>> { 
-        // first persist the file 
+    pub async fn submit_from_tempfile(
+        &self,
+        uploaded_file: &mut RocketTempFile<'_>,
+    ) -> Result<i64, Box<dyn std::error::Error>> {
+        // first persist the file
         // * use a NamedtempFile to get a free path
-        let file = tokio::task::spawn_blocking(move || NamedTempFile::new() ).await.map_err(
-            |_| { std::io::Error::new(std::io::ErrorKind::BrokenPipe, "spawn_block panic")
-        })??;
+        let file = tokio::task::spawn_blocking(move || NamedTempFile::new())
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "spawn_block panic")
+            })??;
         // * move the tempfile content to it
         uploaded_file.persist_to(file.path()).await?;
 
         let job_id = self.submit_workflow(file.path()).await?;
         Ok(job_id)
-
     }
 }
-

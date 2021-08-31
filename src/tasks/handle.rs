@@ -1,11 +1,6 @@
-use crate::messaging::{ExecutorQuery, TaskStatus, AsyncSendable};
-use rocket::tokio::{
-    fs::metadata,
-    net::UnixStream,
-    fs::File,
-    io::AsyncReadExt,
-};
+use crate::messaging::{AsyncSendable, ExecutorQuery, TaskStatus};
 use nix::unistd::Pid;
+use rocket::tokio::{fs::metadata, fs::File, io::AsyncReadExt, net::UnixStream};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -103,7 +98,11 @@ impl TaskHandle {
     }
 
     pub fn handle_string(&self) -> String {
-        self.directory.clone().into_os_string().to_string_lossy().to_string()
+        self.directory
+            .clone()
+            .into_os_string()
+            .to_string_lossy()
+            .to_string()
     }
 
     /// See if a PID file exists to guess if the task is running or not.
@@ -113,7 +112,6 @@ impl TaskHandle {
             Err(_) => false,
         }
     }
-
 
     /// save task PID into `self.pid_file()` (as text).
     pub fn save_pid(&self, pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
@@ -134,7 +132,7 @@ impl TaskHandle {
                 pid_file.read_to_string(&mut content).await?;
                 let pid: i32 = content.parse::<i32>()?;
                 Ok(Pid::from_raw(pid))
-            },
+            }
             Err(e) => Err(e.into()),
         }
     }
@@ -144,7 +142,8 @@ impl TaskHandle {
         let mut sock = UnixStream::connect(&self.monitor_socket())
             .await
             .map_err(|_| format!("Could not open socket {:?}", &self.monitor_socket()))?;
-        ExecutorQuery::Start.async_send_to(&mut sock)
+        ExecutorQuery::Start
+            .async_send_to(&mut sock)
             .await
             .map_err(|_| "Could not send status request to socket".to_string().into())
     }
@@ -170,7 +169,7 @@ impl TaskHandle {
     /// return the status of the task
     pub async fn get_status(&self) -> Result<TaskStatus, Box<dyn std::error::Error>> {
         //if !self.is_running().await {
-            //return Err("task is not running".into());
+        //return Err("task is not running".into());
         //}
         // check if status file exists
         if let Ok(_md) = metadata(self.status_file()).await {

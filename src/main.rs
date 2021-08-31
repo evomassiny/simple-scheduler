@@ -9,19 +9,19 @@ extern crate sqlx;
 extern crate tempfile;
 
 mod messaging;
+mod models;
+mod scheduling;
 pub mod tasks;
 pub mod workflows;
-mod scheduling;
-mod models;
 
-use std::path::{Path,PathBuf};
+use std::path::{Path, PathBuf};
 
 use dotenv::dotenv;
-use rocket::{State,tokio,fs::TempFile};
+use rocket::{fs::TempFile, tokio, State};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
+use scheduling::{SchedulerClient, SchedulerServer};
 use tasks::TaskHandle;
-use scheduling::{SchedulerServer,SchedulerClient};
 
 #[get("/")]
 async fn index() -> &'static str {
@@ -33,20 +33,21 @@ async fn spawn(scheduler: &State<SchedulerClient>) -> String {
     // build task DB object and get its id
     let cmd: String = "sleep 30 && echo $(date)".to_string();
     let scheduler = scheduler.inner();
-    scheduler.submit_command_job("command_job", "task", &cmd).await.expect("failed");
+    scheduler
+        .submit_command_job("command_job", "task", &cmd)
+        .await
+        .expect("failed");
     String::from("task successfully launched")
 }
 
-#[post("/submit", format = "application/xml", data="<uploaded_file>")]
+#[post("/submit", format = "application/xml", data = "<uploaded_file>")]
 async fn submit(scheduler: &State<SchedulerClient>, mut uploaded_file: TempFile<'_>) -> String {
     let scheduler = scheduler.inner();
     match scheduler.submit_from_tempfile(&mut uploaded_file).await {
         Ok(job_id) => format!("Job {:?} successfully created", &job_id),
         Err(error) => format!("Failed to create job: {:?}", error),
     }
-    
 }
-
 
 #[rocket::main]
 async fn main() {

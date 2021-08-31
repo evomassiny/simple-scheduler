@@ -1,11 +1,11 @@
+use nix::{
+    errno::{errno, Errno},
+    libc::{self},
+    sys::mman::{mmap, msync, munmap, MapFlags, MsFlags, ProtFlags},
+};
 use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
-use nix::{
-    libc::{self},
-    sys::mman::{mmap, munmap, msync, ProtFlags, MapFlags, MsFlags},
-    errno::{errno,Errno},
-};
 
 /// Use this to block a process, until another one decides to release it.
 pub struct Barrier {
@@ -13,7 +13,6 @@ pub struct Barrier {
 }
 
 impl Barrier {
-
     /// Build a `Barrier` semaphore.
     /// use it to block a processus until another releases it.
     ///
@@ -38,58 +37,68 @@ impl Barrier {
     /// will allways print:
     /// > A
     /// > B
-    /// 
+    ///
     /// # NOTE:
     /// It uses a POSIX semaphore intialized on a piece of memory
     /// shared across processes.
-    pub fn new() -> Result <Self, String> {
+    pub fn new() -> Result<Self, String> {
         // SAFETY: safe because
         // * semaphore is allocated through `mmap()`
         // * we never de-reference self.semaphore_ptr, the kernel does it itself
         //   through sem_wait() and sem_post()
-        let semaphore_ptr: *mut libc::sem_t =  unsafe {
+        let semaphore_ptr: *mut libc::sem_t = unsafe {
             // request the OS for a pointer to a piece of shared memory
             // big enough to hold a semaphore
             let semaphore_ptr = mmap(
-                0 as * mut core::ffi::c_void,
+                0 as *mut core::ffi::c_void,
                 std::mem::size_of::<libc::sem_t>() as libc::size_t,
                 ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
                 MapFlags::MAP_ANONYMOUS | MapFlags::MAP_SHARED,
                 0 as RawFd,
                 0 as libc::off_t,
-            ).map_err(|errno| format!("Failed to mmap semaphore: {:?}",  errno))?;
+            )
+            .map_err(|errno| format!("Failed to mmap semaphore: {:?}", errno))?;
             // initialize the semaphore
             let code = libc::sem_init(
                 semaphore_ptr as *mut libc::sem_t,
-                1 as libc::c_int,               // 1 means that the semaphore is shared accross processes
+                1 as libc::c_int, // 1 means that the semaphore is shared accross processes
                 0 as libc::c_uint,
             );
             // check for semapthore initilization errors
             if code == -1 {
-                return Err(format!("Failed to init semaphore: {:?}", Errno::from_i32(errno())));
+                return Err(format!(
+                    "Failed to init semaphore: {:?}",
+                    Errno::from_i32(errno())
+                ));
             }
             semaphore_ptr as *mut libc::sem_t
         };
 
-        Ok(Self { semaphore_ptr})
+        Ok(Self { semaphore_ptr })
     }
 
     /// Block until a process calls ".release()"
     pub fn wait(&self) -> Result<(), String> {
         // SAFETY: safe because self.semaphore_ptr was initialzed
-        let code = unsafe { libc::sem_wait(self.semaphore_ptr)};
+        let code = unsafe { libc::sem_wait(self.semaphore_ptr) };
         if code == -1 {
-            return Err(format!("Failed to wait on semaphore: {:?}", Errno::from_i32(errno())));
+            return Err(format!(
+                "Failed to wait on semaphore: {:?}",
+                Errno::from_i32(errno())
+            ));
         }
         Ok(())
     }
-    
+
     /// release waiting processes
     pub fn release(&self) -> Result<(), String> {
         // SAFETY: safe because self.semaphore_ptr was initialzed
-        let code = unsafe {libc::sem_post(self.semaphore_ptr)};
+        let code = unsafe { libc::sem_post(self.semaphore_ptr) };
         if code == -1 {
-            return Err(format!("Failed to release semaphore: {:?}", Errno::from_i32(errno())));
+            return Err(format!(
+                "Failed to release semaphore: {:?}",
+                Errno::from_i32(errno())
+            ));
         }
         Ok(())
     }
@@ -102,23 +111,28 @@ impl Drop for Barrier {
             // destroy the semaphore
             let _ = libc::sem_destroy(self.semaphore_ptr);
             // unmap the shared memory:
-            let _ = munmap(self.semaphore_ptr as *mut libc::c_void, std::mem::size_of::<libc::sem_t>());
+            let _ = munmap(
+                self.semaphore_ptr as *mut libc::c_void,
+                std::mem::size_of::<libc::sem_t>(),
+            );
         }
     }
 }
 
 #[test]
 fn test_barrier() {
+    use nix::unistd::{fork, ForkResult};
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
-    use nix::unistd::{fork, ForkResult};
     use std::{thread, time::Duration};
 
-    // build pipe 
+    // build pipe
     let (mut rx, mut tx) = UnixStream::pair().expect("failed to build pipe");
     // make it unidirectional
-    rx.shutdown(std::net::Shutdown::Write).expect("closing failed");
-    tx.shutdown(std::net::Shutdown::Read).expect("closing failed");
+    rx.shutdown(std::net::Shutdown::Write)
+        .expect("closing failed");
+    tx.shutdown(std::net::Shutdown::Read)
+        .expect("closing failed");
     // remove any read time limit
     rx.set_read_timeout(None).expect("fail to set pipe timeout");
 
@@ -146,8 +160,7 @@ fn test_barrier() {
                 let mut data: [u8; 2] = [0u8; 2];
                 rx.read_exact(&mut data).expect("Failed to read pipe");
                 assert_eq!(&data, b"AB");
-                
-            },
+            }
             Ok(ForkResult::Child) => {
                 // wait for parent
                 parent_has_written_barrier.wait().unwrap();
@@ -156,7 +169,7 @@ fn test_barrier() {
                 tx.flush().unwrap();
                 // release parent
                 child_has_written_barrier.release().unwrap();
-            },
+            }
             Err(e) => panic!("fork failed: {}", e),
         }
     }

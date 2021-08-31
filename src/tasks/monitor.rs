@@ -1,14 +1,14 @@
+use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, ToSchedulerMsg};
 use crate::tasks::handle::TaskHandle;
 use crate::tasks::ipc::Barrier;
-use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, ToSchedulerMsg};
 use nix::{
+    libc,
     sys::{
         epoll::{epoll_create, epoll_ctl, epoll_wait, EpollEvent, EpollFlags, EpollOp},
         signal::{kill, SigSet, Signal},
-        signalfd::{SfdFlags, SignalFd, siginfo},
+        signalfd::{siginfo, SfdFlags, SignalFd},
     },
     unistd::{close, Pid},
-    libc,
 };
 use std::{
     collections::HashMap,
@@ -33,7 +33,6 @@ pub struct Monitor {
 }
 
 impl Monitor {
-
     /// start task process (release blocking Fence).
     fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(rel) = self.task_barrier.take() {
@@ -154,7 +153,8 @@ impl Monitor {
 
         // start the event loop:
         'event_loop: while let Ok(event_count) =
-            epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT) // wait for event completion
+            epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT)
+        // wait for event completion
         {
             for event in events.iter().take(event_count) {
                 // fetch the data we've associated with the event (file descriptors)
@@ -188,9 +188,9 @@ impl Monitor {
                     // data is ready to read on one of the connection
                     stream_fd => {
                         // fetch the stream for the fd, and process the request
-                        let mut stream = streams_by_fd
-                            .remove(&stream_fd)
-                            .ok_or_else(|| "No stream using this RawFD (unreachable)".to_string())?;
+                        let mut stream = streams_by_fd.remove(&stream_fd).ok_or_else(|| {
+                            "No stream using this RawFD (unreachable)".to_string()
+                        })?;
                         // unregister the stream from the epoll
                         epoll_ctl(epoll_fd, EpollOp::EpollCtlDel, stream_fd, None)?;
                         // read queries from the stream, ignore failures
@@ -224,7 +224,6 @@ impl Monitor {
     }
 }
 
-
 impl TaskStatus {
     /// Build a Status from the siginfo struct returned by reading a SIGCHLD signalfd
     /// based on `man 2 sigaction`
@@ -251,4 +250,3 @@ impl TaskStatus {
         }
     }
 }
-

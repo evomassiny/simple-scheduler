@@ -1,4 +1,4 @@
-use std::collections::{HashSet,HashMap};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub enum WorkflowError {
@@ -18,8 +18,7 @@ pub struct WorkFlowTask {
 }
 
 impl WorkFlowTask {
-
-    /// Format executable and executable argument into one 
+    /// Format executable and executable argument into one
     /// shell command.
     pub fn command(&self) -> String {
         let mut cmd = self.executable.clone();
@@ -47,19 +46,23 @@ pub struct WorkFlowGraph {
     ///  * each elements is a list of edge starting from `self.tasks[element_index]`.
     ///  * each elements in that list is the task index (in self.tasks) where this edge is going
     ///  to.
-    pub (crate) dependency_indices: Vec<Vec<usize>>,
+    pub(crate) dependency_indices: Vec<Vec<usize>>,
     /// index of each task (referenced by names) in `self.tasks`
-    pub (crate) name_to_idx: HashMap<String, usize>,
+    pub(crate) name_to_idx: HashMap<String, usize>,
 }
 
 impl WorkFlowGraph {
-
     /// returns references to the dependencies of `self`
-    pub fn get_task_dependencies<'a>(&'a self, task_name: &str) -> Result<Vec<&'a WorkFlowTask>, WorkflowError> {
-        let task_idx: usize = *self.name_to_idx
+    pub fn get_task_dependencies<'a>(
+        &'a self,
+        task_name: &str,
+    ) -> Result<Vec<&'a WorkFlowTask>, WorkflowError> {
+        let task_idx: usize = *self
+            .name_to_idx
             .get(task_name)
             .ok_or(WorkflowError::TaskDoesNotExist)?;
-        let dependency_indices = self.dependency_indices
+        let dependency_indices = self
+            .dependency_indices
             .get(task_idx)
             .ok_or(WorkflowError::TaskDoesNotExist)?;
         let mut tasks: Vec<&WorkFlowTask> = Vec::new();
@@ -69,7 +72,7 @@ impl WorkFlowGraph {
         Ok(tasks)
     }
 
-    /// Check for cycle in the dependency graph, 
+    /// Check for cycle in the dependency graph,
     /// of the `self.tasks[task_idx]` task.
     fn is_task_dependency_cycle_free(&self, task_idx: usize) -> Result<(), WorkflowError> {
         if task_idx >= self.tasks.len() {
@@ -78,11 +81,11 @@ impl WorkFlowGraph {
 
         // one Vec per branch depth in digraph
         let mut queues: Vec<Vec<usize>> = vec![vec![task_idx]];
-        // keeps track of every node traversed, 
+        // keeps track of every node traversed,
         // if we traverse a node twice, we have have a cycle.
         let mut cursor_in_queues: Vec<usize> = vec![0];
 
-        // tarverse the dependency 
+        // tarverse the dependency
         while !queues.is_empty() {
             // fetch working node
             let mut level = queues.len() - 1;
@@ -104,15 +107,15 @@ impl WorkFlowGraph {
                 queues.push(node_deps.clone());
                 cursor_in_queues.push(0);
                 continue;
-            } 
-            
+            }
+
             // If no dependencies; set current node as "parsed" (eg update cursors),
             // backtrack if current node was the last one of level.
             'cursor_update: while !queues.is_empty() {
                 level = queues.len() - 1;
                 cursor_in_queues[level] += 1;
                 let neighbour_count = queues[level].len(); // nb of node at the same level as `node`
-                // if there is still nodes to parse in level
+                                                           // if there is still nodes to parse in level
                 if cursor_in_queues[level] != neighbour_count {
                     break 'cursor_update;
                 }
@@ -128,13 +131,15 @@ impl WorkFlowGraph {
         // NOTE: this is suboptimal: we might check several time the cycle starting
         // from a task, if this task is in the dependency tree of several other tasks.
         for task_idx in 0..self.tasks.len() {
-            if let Err(WorkflowError::DependencyCycle) = self.is_task_dependency_cycle_free(task_idx) {
+            if let Err(WorkflowError::DependencyCycle) =
+                self.is_task_dependency_cycle_free(task_idx)
+            {
                 return false;
             }
         }
         true
     }
-    
+
     /// Check for name duplicates in task
     pub fn are_task_names_unique(&self) -> bool {
         let mut names = HashSet::new();
@@ -146,34 +151,26 @@ impl WorkFlowGraph {
         }
         true
     }
-
-
 }
 
 #[test]
 fn test_cycle_detection() {
-    let di_graph = WorkFlowGraph::from_str(
-        include_str!("../../test-data/workflow.xml")
-    ).unwrap();
+    let di_graph = WorkFlowGraph::from_str(include_str!("../../test-data/workflow.xml")).unwrap();
     assert_eq!(di_graph.is_cycle_free(), true);
 
-    let cycle_graph = WorkFlowGraph::from_str(
-        include_str!("../../test-data/workflow_with_cycle.xml")
-    ).unwrap();
+    let cycle_graph =
+        WorkFlowGraph::from_str(include_str!("../../test-data/workflow_with_cycle.xml")).unwrap();
     assert_eq!(cycle_graph.is_cycle_free(), false);
-
 }
 
 #[test]
 fn test_name_uniqueness() {
-    let di_graph = WorkFlowGraph::from_str(
-        include_str!("../../test-data/workflow.xml")
-    ).unwrap();
+    let di_graph = WorkFlowGraph::from_str(include_str!("../../test-data/workflow.xml")).unwrap();
     assert_eq!(di_graph.are_task_names_unique(), true);
 
-    let invalid_graph = WorkFlowGraph::from_str(
-        include_str!("../../test-data/workflow_with_duplicated_task_names.xml")
-    ).unwrap();
+    let invalid_graph = WorkFlowGraph::from_str(include_str!(
+        "../../test-data/workflow_with_duplicated_task_names.xml"
+    ))
+    .unwrap();
     assert_eq!(invalid_graph.are_task_names_unique(), false);
-
 }

@@ -1,10 +1,10 @@
-use crate::workflows::WorkFlowGraph;
 use crate::messaging::TaskStatus;
-use async_trait::async_trait;
-use sqlx::sqlite::SqliteConnection;
-use chrono::{NaiveDateTime, Utc};
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
+use crate::workflows::WorkFlowGraph;
+use async_trait::async_trait;
+use chrono::{NaiveDateTime, Utc};
+use sqlx::sqlite::SqliteConnection;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -32,7 +32,7 @@ pub trait Model {
     fn id(&self) -> Option<i64>;
 
     //async fn save(&mut self) -> Result<(), ModelError>;
-    async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError>{
+    async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let id = self.id();
         if id.is_some() {
             self.update(conn).await?;
@@ -44,7 +44,7 @@ pub trait Model {
 }
 
 /// State of job/task
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Status {
     Pending,
     Stopped,
@@ -54,9 +54,7 @@ pub enum Status {
     Running,
 }
 
-
 impl Status {
-
     pub fn from_task_status(status: &TaskStatus) -> Self {
         match *status {
             TaskStatus::Pending => Self::Pending,
@@ -105,7 +103,7 @@ impl Status {
             3 => Ok(Self::Failed),
             4 => Ok(Self::Succeed),
             5 => Ok(Self::Running),
-            v => Err(format!("'{:}' cannot be converted to a Status", v))
+            v => Err(format!("'{:}' cannot be converted to a Status", v)),
         }
     }
 
@@ -121,7 +119,7 @@ impl Status {
     }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Job {
     pub id: Option<i64>,
     pub name: String,
@@ -132,25 +130,27 @@ pub struct Job {
 #[async_trait]
 impl Model for Job {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let _query_result = sqlx::query("UPDATE jobs SET name = ?, submit_time = ?, status = ? WHERE id = ?")
-            .bind(&self.name)
-            .bind(&self.submit_time.format("%Y-%m-%d %H:%M:%S").to_string())
-            .bind(self.status.as_u8())
-            .bind(self.id.ok_or(ModelError::ModelNotFound)?)
-            .execute(conn)
-            .await
-            .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+        let _query_result =
+            sqlx::query("UPDATE jobs SET name = ?, submit_time = ?, status = ? WHERE id = ?")
+                .bind(&self.name)
+                .bind(&self.submit_time.format("%Y-%m-%d %H:%M:%S").to_string())
+                .bind(self.status.as_u8())
+                .bind(self.id.ok_or(ModelError::ModelNotFound)?)
+                .execute(conn)
+                .await
+                .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
         Ok(())
     }
 
-    async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError>{
-        let query_result = sqlx::query("INSERT INTO jobs (name, submit_time, status) VALUES (?, ?, ?)")
-            .bind(&self.name)
-            .bind(&self.submit_time.format("%Y-%m-%d %H:%M:%S").to_string())
-            .bind(self.status.as_u8())
-            .execute(conn)
-            .await
-            .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+    async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
+        let query_result =
+            sqlx::query("INSERT INTO jobs (name, submit_time, status) VALUES (?, ?, ?)")
+                .bind(&self.name)
+                .bind(&self.submit_time.format("%Y-%m-%d %H:%M:%S").to_string())
+                .bind(self.status.as_u8())
+                .execute(conn)
+                .await
+                .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
         let id = query_result.last_insert_rowid();
         self.id = Some(id);
         Ok(())
@@ -159,76 +159,83 @@ impl Model for Job {
     fn id(&self) -> Option<i64> {
         self.id
     }
-
 }
 
 impl Job {
-
     /// Build a pending Job, use the current time
-    /// as `submit_time`. 
+    /// as `submit_time`.
     /// The returned instance is not saved in the database.
     fn new(name: &str) -> Self {
         Job {
             id: None,
             name: name.to_string(),
-            submit_time: NaiveDateTime::from_timestamp(
-                Utc::now().timestamp(), 
-                0,
-            ),
+            submit_time: NaiveDateTime::from_timestamp(Utc::now().timestamp(), 0),
             status: Status::Pending,
         }
     }
 
     /// query database and return all jobs with a status set to `status`
-    pub async fn select_by_status(status: &Status, conn: &mut SqliteConnection) -> Result<Vec<Self>, ModelError>{
+    pub async fn select_by_status(
+        status: &Status,
+        conn: &mut SqliteConnection,
+    ) -> Result<Vec<Self>, ModelError> {
         let mut jobs: Vec<Self> = Vec::new();
-        let mut rows = sqlx::query("SELECT id, name, submit_time FROM jobs WHERE status = ? ORDER BY submit_time")
-            .bind(status.as_u8())
-            .fetch(conn);
+        let mut rows = sqlx::query(
+            "SELECT id, name, submit_time FROM jobs WHERE status = ? ORDER BY submit_time",
+        )
+        .bind(status.as_u8())
+        .fetch(conn);
 
-        while let Some(row) = rows.try_next().await.map_err(|e| ModelError::DBError(e.to_string()))? {
-            jobs.push(
-                Self {
-                    id: row.try_get("id")
-                        .map_err(|_| ModelError::ColumnError("id".to_string()))?,
-                    name: row.try_get("name")
-                        .map_err(|_| ModelError::ColumnError("name".to_string()))?,
-                    status: *status,
-                    submit_time: row.try_get("submit_time")
-                        .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
-                }
-            );
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| ModelError::DBError(e.to_string()))?
+        {
+            jobs.push(Self {
+                id: row
+                    .try_get("id")
+                    .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+                name: row
+                    .try_get("name")
+                    .map_err(|_| ModelError::ColumnError("name".to_string()))?,
+                status: *status,
+                submit_time: row
+                    .try_get("submit_time")
+                    .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
+            });
         }
         Ok(jobs)
     }
-    
+
     /// Select a Job by its id
     pub async fn get_by_id(id: i64, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
-        let row = sqlx::query(
-                "SELECT id, name, status, submit_time FROM jobs WHERE id = ?"
-            ).bind(&id)
+        let row = sqlx::query("SELECT id, name, status, submit_time FROM jobs WHERE id = ?")
+            .bind(&id)
             .fetch_one(conn)
             .await
             .map_err(|_| ModelError::ModelNotFound)?;
 
-        let status_code: u8 = row.try_get("status")
+        let status_code: u8 = row
+            .try_get("status")
             .map_err(|_| ModelError::ColumnError("status".to_string()))?;
         let status = Status::from_u8(status_code)
             .map_err(|_| ModelError::ColumnError("status".to_string()))?;
-        Ok(
-            Self {
-                id: row.try_get("id").map_err(|_| ModelError::ColumnError("id".to_string()))?,
-                name: row.try_get("name").map_err(|_| ModelError::ColumnError("name".to_string()))?,
-                status,
-                submit_time: row.try_get("submit_time")
-                    .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
-            }
-        )
+        Ok(Self {
+            id: row
+                .try_get("id")
+                .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+            name: row
+                .try_get("name")
+                .map_err(|_| ModelError::ColumnError("name".to_string()))?,
+            status,
+            submit_time: row
+                .try_get("submit_time")
+                .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
+        })
     }
-
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Task {
     pub id: Option<i64>,
     pub name: String,
@@ -241,29 +248,33 @@ pub struct Task {
 #[async_trait]
 impl Model for Task {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let _query_result = sqlx::query("UPDATE tasks SET name = ?, status = ?, handle = ?, command = ?, job = ? WHERE id = ?")
-            .bind(&self.name)
-            .bind(self.status.as_u8())
-            .bind(&self.handle)
-            .bind(&self.command)
-            .bind(&self.job)
-            .bind(self.id.ok_or(ModelError::ModelNotFound)?)
-            .execute(conn)
-            .await
-            .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+        let _query_result = sqlx::query(
+            "UPDATE tasks SET name = ?, status = ?, handle = ?, command = ?, job = ? WHERE id = ?",
+        )
+        .bind(&self.name)
+        .bind(self.status.as_u8())
+        .bind(&self.handle)
+        .bind(&self.command)
+        .bind(&self.job)
+        .bind(self.id.ok_or(ModelError::ModelNotFound)?)
+        .execute(conn)
+        .await
+        .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
         Ok(())
     }
 
-    async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError>{
-        let query_result = sqlx::query("INSERT INTO tasks (name, status, handle, command, job) VALUES (?, ?, ?, ?, ?)")
-            .bind(&self.name)
-            .bind(self.status.as_u8())
-            .bind(&self.handle)
-            .bind(&self.command)
-            .bind(&self.job)
-            .execute(conn)
-            .await
-            .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+    async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
+        let query_result = sqlx::query(
+            "INSERT INTO tasks (name, status, handle, command, job) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&self.name)
+        .bind(self.status.as_u8())
+        .bind(&self.handle)
+        .bind(&self.command)
+        .bind(&self.job)
+        .execute(conn)
+        .await
+        .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
         let id = query_result.last_insert_rowid();
         self.id = Some(id);
         Ok(())
@@ -272,71 +283,91 @@ impl Model for Task {
     fn id(&self) -> Option<i64> {
         self.id
     }
-
 }
 
 impl Task {
-
     /// Select a Task by its handle
-    pub async fn get_by_handle(handle: &str, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
+    pub async fn get_by_handle(
+        handle: &str,
+        conn: &mut SqliteConnection,
+    ) -> Result<Self, ModelError> {
         let row = sqlx::query(
-                "SELECT id, name, status, handle, command, job FROM tasks WHERE handle = ?"
-            ).bind(&handle)
-            .fetch_one(conn)
-            .await
-            .map_err(|_| ModelError::ModelNotFound)?;
+            "SELECT id, name, status, handle, command, job FROM tasks WHERE handle = ?",
+        )
+        .bind(&handle)
+        .fetch_one(conn)
+        .await
+        .map_err(|_| ModelError::ModelNotFound)?;
 
-        let status_code: u8 = row.try_get("status")
+        let status_code: u8 = row
+            .try_get("status")
             .map_err(|_| ModelError::ColumnError("status".to_string()))?;
         let status = Status::from_u8(status_code)
             .map_err(|_| ModelError::ColumnError("status".to_string()))?;
-        Ok(
-            Self {
-                id: row.try_get("id").map_err(|_| ModelError::ColumnError("id".to_string()))?,
-                name: row.try_get("name").map_err(|_| ModelError::ColumnError("name".to_string()))?,
-                status,
-                handle: row.try_get("handle").map_err(|_| ModelError::ColumnError("handle".to_string()))?,
-                command: row.try_get("command").map_err(|_| ModelError::ColumnError("command".to_string()))?,
-                job: row.try_get("job").map_err(|_| ModelError::ColumnError("job".to_string()))?,
-            }
-        )
+        Ok(Self {
+            id: row
+                .try_get("id")
+                .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+            name: row
+                .try_get("name")
+                .map_err(|_| ModelError::ColumnError("name".to_string()))?,
+            status,
+            handle: row
+                .try_get("handle")
+                .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
+            command: row
+                .try_get("command")
+                .map_err(|_| ModelError::ColumnError("command".to_string()))?,
+            job: row
+                .try_get("job")
+                .map_err(|_| ModelError::ColumnError("job".to_string()))?,
+        })
     }
 
     /// query database and return all tasks belonging to `job_id`
-    pub async fn select_by_job(job_id: i64, conn: &mut SqliteConnection) -> Result<Vec<Self>, ModelError>{
+    pub async fn select_by_job(
+        job_id: i64,
+        conn: &mut SqliteConnection,
+    ) -> Result<Vec<Self>, ModelError> {
         let mut tasks: Vec<Task> = Vec::new();
-        let mut rows = sqlx::query("SELECT id, name, status, handle, command FROM tasks WHERE job = ?")
-            .bind(&job_id)
-            .fetch(conn);
+        let mut rows =
+            sqlx::query("SELECT id, name, status, handle, command FROM tasks WHERE job = ?")
+                .bind(&job_id)
+                .fetch(conn);
 
-        while let Some(row) = rows.try_next().await.map_err(|e| ModelError::DBError(e.to_string()))? {
-            let status_code = row.try_get("status")
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| ModelError::DBError(e.to_string()))?
+        {
+            let status_code = row
+                .try_get("status")
                 .map_err(|_| ModelError::ColumnError("status".to_string()))?;
             let status = Status::from_u8(status_code)
                 .map_err(|_| ModelError::ColumnError("status code".to_string()))?;
 
-            tasks.push(
-                Self {
-                    id: row.try_get("id")
-                        .map_err(|_| ModelError::ColumnError("id".to_string()))?,
-                    name: row.try_get("name")
-                        .map_err(|_| ModelError::ColumnError("name".to_string()))?,
-                    handle: row.try_get("handle")
-                        .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
-                    command: row.try_get("command")
-                        .map_err(|_| ModelError::ColumnError("command".to_string()))?,
-                    job: job_id,
-                    status,
-                }
-            );
+            tasks.push(Self {
+                id: row
+                    .try_get("id")
+                    .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+                name: row
+                    .try_get("name")
+                    .map_err(|_| ModelError::ColumnError("name".to_string()))?,
+                handle: row
+                    .try_get("handle")
+                    .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
+                command: row
+                    .try_get("command")
+                    .map_err(|_| ModelError::ColumnError("command".to_string()))?,
+                job: job_id,
+                status,
+            });
         }
         Ok(tasks)
     }
 }
 
-
-
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct TaskDependency {
     pub id: Option<i64>,
     pub job: i64,
@@ -347,25 +378,27 @@ pub struct TaskDependency {
 #[async_trait]
 impl Model for TaskDependency {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let _query_result = sqlx::query("UPDATE task_dependencies SET child = ?, parent = ?, job = ? WHERE id = ?")
-            .bind(&self.child)
-            .bind(&self.parent)
-            .bind(&self.job)
-            .bind(self.id.ok_or(ModelError::ModelNotFound)?)
-            .execute(conn)
-            .await
-            .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+        let _query_result =
+            sqlx::query("UPDATE task_dependencies SET child = ?, parent = ?, job = ? WHERE id = ?")
+                .bind(&self.child)
+                .bind(&self.parent)
+                .bind(&self.job)
+                .bind(self.id.ok_or(ModelError::ModelNotFound)?)
+                .execute(conn)
+                .await
+                .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
         Ok(())
     }
 
-    async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError>{
-        let query_result = sqlx::query("INSERT INTO task_dependencies (job, child, parent) VALUES (?, ?, ?)")
-            .bind(&self.job)
-            .bind(&self.child)
-            .bind(&self.parent)
-            .execute(conn)
-            .await
-            .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+    async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
+        let query_result =
+            sqlx::query("INSERT INTO task_dependencies (job, child, parent) VALUES (?, ?, ?)")
+                .bind(&self.job)
+                .bind(&self.child)
+                .bind(&self.parent)
+                .execute(conn)
+                .await
+                .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
         let id = query_result.last_insert_rowid();
         self.id = Some(id);
         Ok(())
@@ -374,39 +407,44 @@ impl Model for TaskDependency {
     fn id(&self) -> Option<i64> {
         self.id
     }
-
 }
 
 impl TaskDependency {
-    
     /// query database and return all task dependencies belonging to `job_id`
-    pub async fn select_by_job(job_id: i64, conn: &mut SqliteConnection) -> Result<Vec<Self>, ModelError>{
+    pub async fn select_by_job(
+        job_id: i64,
+        conn: &mut SqliteConnection,
+    ) -> Result<Vec<Self>, ModelError> {
         let mut dependencies: Vec<Self> = Vec::new();
         let mut rows = sqlx::query("SELECT id, child, parent FROM task_dependencies WHERE job = ?")
             .bind(&job_id)
             .fetch(conn);
 
-        while let Some(row) = rows.try_next().await.map_err(|e| ModelError::DBError(e.to_string()))? {
-            dependencies.push(
-                Self {
-                    id: row.try_get("id")
-                        .map_err(|_| ModelError::ColumnError("id".to_string()))?,
-                    child: row.try_get("child")
-                        .map_err(|_| ModelError::ColumnError("name".to_string()))?,
-                    parent: row.try_get("parent")
-                        .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
-                    job: job_id,
-                }
-            );
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| ModelError::DBError(e.to_string()))?
+        {
+            dependencies.push(Self {
+                id: row
+                    .try_get("id")
+                    .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+                child: row
+                    .try_get("child")
+                    .map_err(|_| ModelError::ColumnError("name".to_string()))?,
+                parent: row
+                    .try_get("parent")
+                    .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
+                job: job_id,
+            });
         }
         Ok(dependencies)
     }
 }
 
-
 /// A `Batch` is a graph of task to be executed.
 /// It is a composition of 3 kinds of models:
-/// * one `Job`: metadata about the whole Batch 
+/// * one `Job`: metadata about the whole Batch
 /// * a collections of `Task`s, (commands to be executed)
 /// * a collections of `TaskDependency`s, which define the ordering
 /// constraints of the whole batch execution.
@@ -419,11 +457,13 @@ pub struct Batch {
     pub dependencies: Vec<TaskDependency>,
 }
 
-
 impl Batch {
-
-    pub async fn from_shell_command(job_name: &str, task_name: &str, cmd: &str, conn: &mut SqliteConnection)
-        -> Result<Self, ModelError> {
+    pub async fn from_shell_command(
+        job_name: &str,
+        task_name: &str,
+        cmd: &str,
+        conn: &mut SqliteConnection,
+    ) -> Result<Self, ModelError> {
         let mut job = Job::new(&job_name);
         let _ = job.save(conn).await?;
         let job_id: i64 = job.id.ok_or(ModelError::ModelNotFound)?;
@@ -438,14 +478,17 @@ impl Batch {
         };
         let _ = task.save(conn).await?;
 
-        Ok(Self { 
+        Ok(Self {
             job,
             tasks: vec![task],
-            dependencies: vec![] 
+            dependencies: vec![],
         })
     }
 
-    pub async fn from_graph(workflow: &WorkFlowGraph, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
+    pub async fn from_graph(
+        workflow: &WorkFlowGraph,
+        conn: &mut SqliteConnection,
+    ) -> Result<Self, ModelError> {
         // validate input
         if !workflow.are_task_names_unique() {
             return Err(ModelError::InvalidTaskName);
@@ -480,22 +523,39 @@ impl Batch {
             let child: i64 = tasks[task_idx].id().ok_or(ModelError::ModelNotFound)?;
             for dep_idx in deps_ids {
                 let parent: i64 = tasks[*dep_idx].id().ok_or(ModelError::ModelNotFound)?;
-                let mut dependency = TaskDependency { id: None, child, parent, job: job_id };
+                let mut dependency = TaskDependency {
+                    id: None,
+                    child,
+                    parent,
+                    job: job_id,
+                };
                 let _ = dependency.save(conn).await?;
                 dependencies.push(dependency);
             }
         }
-        Ok(Self { job, tasks, dependencies })
+        Ok(Self {
+            job,
+            tasks,
+            dependencies,
+        })
     }
 
     pub async fn from_job(job: Job, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
         // select tasks by job id
         let tasks = Task::select_by_job(job.id.ok_or(ModelError::ModelNotFound)?, conn).await?;
-        let dependencies = TaskDependency::select_by_job(job.id.ok_or(ModelError::ModelNotFound)?, conn).await?;
-        Ok(Self { job, tasks, dependencies })
+        let dependencies =
+            TaskDependency::select_by_job(job.id.ok_or(ModelError::ModelNotFound)?, conn).await?;
+        Ok(Self {
+            job,
+            tasks,
+            dependencies,
+        })
     }
 
-    pub async fn next_ready_task<'a,'b>(&'a self) -> Result<Option<&'b Task>, ModelError> where 'a: 'b {
+    pub async fn next_ready_task<'a, 'b>(&'a self) -> Result<Option<&'b Task>, ModelError>
+    where
+        'a: 'b,
+    {
         // build task index
         let mut task_index: HashMap<i64, usize> = HashMap::new();
         for (idx, task) in self.tasks.iter().enumerate() {
@@ -510,21 +570,20 @@ impl Batch {
                 // insert new vec
                 None => {
                     let _ = dependencies_index.insert(dependency.child, vec![dependency.parent]);
-                },
+                }
             }
         }
         // find task with fulfilled dependencies
         'ready_task_lookup: for task in self.tasks.iter() {
             // ignore running, of finished tasks
-            if ! task.status.is_pending() {
+            if !task.status.is_pending() {
                 continue 'ready_task_lookup;
             }
             let task_id = task.id.ok_or(ModelError::InvalidTaskId)?;
             // iter dependencies
             if let Some(parent_ids) = dependencies_index.get(&task_id) {
                 for parent_id in parent_ids {
-                    let idx = task_index.get(parent_id)
-                        .ok_or(ModelError::InvalidTaskId)?;
+                    let idx = task_index.get(parent_id).ok_or(ModelError::InvalidTaskId)?;
                     let parent = &self.tasks[*idx];
                     /* TODO handle failed states */
                     if !parent.status.is_finished() {
@@ -540,16 +599,17 @@ impl Batch {
 
 #[cfg(test)]
 mod test {
-    use crate::workflows::{WorkFlowGraph,WorkFlowTask};
-    use sqlx::{SqliteConnection,Connection,Executor};
-    use rocket::tokio;
-    use std::collections::HashMap;
     use crate::models::Batch;
+    use crate::workflows::{WorkFlowGraph, WorkFlowTask};
+    use rocket::tokio;
+    use sqlx::{Connection, Executor, SqliteConnection};
+    use std::collections::HashMap;
 
     /// create an in-memory database, and execute the initial migration.
     async fn setup_in_memory_database() -> Result<SqliteConnection, Box<dyn std::error::Error>> {
         let mut conn = SqliteConnection::connect("sqlite::memory:").await?;
-        conn.execute(include_str!("../migrations/20210402155322_creation.sql")).await?;
+        conn.execute(include_str!("../migrations/20210402155322_creation.sql"))
+            .await?;
         Ok(conn)
     }
 
@@ -579,7 +639,7 @@ mod test {
                 name_to_idx.insert("A".to_string(), 0);
                 name_to_idx.insert("B".to_string(), 1);
                 name_to_idx
-            }
+            },
         }
     }
 
@@ -591,22 +651,30 @@ mod test {
         let graph = build_test_workflow_graph();
         assert!(graph.is_cycle_free());
         assert!(graph.are_task_names_unique());
-        
+
         // test batch creation
-        let batch = Batch::from_graph(&graph, &mut conn).await.expect("Failed to build Batch");
+        let batch = Batch::from_graph(&graph, &mut conn)
+            .await
+            .expect("Failed to build Batch");
         assert_eq!(&batch.job.name, "test-job");
 
         // test (loosely) the model creation in the database
         let (job_name,): (String,) = sqlx::query_as("SELECT name FROM jobs")
-            .fetch_one(&mut conn).await.expect("failed to count tasks");
+            .fetch_one(&mut conn)
+            .await
+            .expect("failed to count tasks");
         assert_eq!(&job_name, &batch.job.name);
 
         let (task_count,): (i64,) = sqlx::query_as("SELECT count(id) FROM tasks")
-            .fetch_one(&mut conn).await.expect("failed to count tasks");
+            .fetch_one(&mut conn)
+            .await
+            .expect("failed to count tasks");
         assert_eq!(task_count, 2);
 
         let (dep_count,): (i64,) = sqlx::query_as("SELECT count(id) FROM task_dependencies")
-            .fetch_one(&mut conn).await.expect("failed to count tasks");
+            .fetch_one(&mut conn)
+            .await
+            .expect("failed to count tasks");
         assert_eq!(dep_count, 1);
     }
 }

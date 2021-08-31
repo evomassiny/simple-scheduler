@@ -6,9 +6,9 @@ use nix::{
 use rocket::tokio::task::spawn_blocking;
 use std::{ffi::CString, os::unix::io::RawFd, path::PathBuf};
 
-use crate::tasks::monitor::Monitor;
 use crate::tasks::handle::TaskHandle;
 use crate::tasks::ipc::Barrier;
+use crate::tasks::monitor::Monitor;
 //use crate::tasks::task_status::TaskStatus;
 use crate::messaging::TaskStatus;
 use crate::tasks::utils::{
@@ -17,7 +17,6 @@ use crate::tasks::utils::{
 };
 
 impl TaskHandle {
-
     /**
      * Spawn a `command` in a dedicated daemon process.
      *
@@ -35,7 +34,11 @@ impl TaskHandle {
      *  SAFETY: This method uses unsafe unix calls to spawn the process
      *  **as a daemon process**, so it can outlive the caller process.
      */
-    fn spawn_blocking(cmd: &str, id: i64, hypervisor_sock: Option<PathBuf>) -> Result<Self, Box<dyn std::error::Error>> {
+    fn spawn_blocking(
+        cmd: &str,
+        id: i64,
+        hypervisor_sock: Option<PathBuf>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         // create process handle (holds path to process related files)
         let mut handle = Self::from_task_id(id);
         handle
@@ -70,10 +73,8 @@ impl TaskHandle {
                             let _ = setsid().expect("Failed to detach");
 
                             // Close all files but stdin/stdout and pipes:
-                            let fd_to_keep: [RawFd; 2] = [
-                                STDERR_FILENO as RawFd,
-                                STDOUT_FILENO as RawFd,
-                            ];
+                            let fd_to_keep: [RawFd; 2] =
+                                [STDERR_FILENO as RawFd, STDOUT_FILENO as RawFd];
                             close_everything_but(&fd_to_keep[..]).expect("Could not close fd");
 
                             // set STDERR and STDOUT to files
@@ -174,7 +175,11 @@ impl TaskHandle {
      *
      *  see https://www.freedesktop.org/software/systemd/man/daemon.html
      */
-    pub async fn spawn(cmd: &str, id: i64, hypervisor_sock: Option<PathBuf>) -> Result<Self, String> {
+    pub async fn spawn(
+        cmd: &str,
+        id: i64,
+        hypervisor_sock: Option<PathBuf>,
+    ) -> Result<Self, String> {
         let command: String = String::from(cmd);
         // wrap the blocking function into its own thread, to avoid messing
         // with the current executor

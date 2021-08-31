@@ -1,14 +1,14 @@
-use rocket::tokio::{
-    net::{UnixListener, UnixStream},
-    self,
-};
-use crate::messaging::{ToSchedulerMsg, AsyncSendable, TaskStatus};
-use crate::models::{Task,Batch,Job,Status};
+use crate::messaging::{AsyncSendable, TaskStatus, ToSchedulerMsg};
 use crate::models::Model;
+use crate::models::{Batch, Job, Status, Task};
+use crate::tasks::TaskHandle;
+use rocket::tokio::{
+    self,
+    net::{UnixListener, UnixStream},
+};
 use sqlx::sqlite::SqlitePool;
-use std::path::PathBuf;
 use std::error::Error;
-use crate::tasks::{TaskHandle};
+use std::path::PathBuf;
 
 pub use crate::scheduling::client::SchedulerClient;
 
@@ -31,9 +31,12 @@ pub struct SchedulerServer {
 }
 
 impl SchedulerServer {
-
     pub fn new(socket: PathBuf, pool: SqlitePool) -> Self {
-        Self { socket, pool, max_capacity: 40 }
+        Self {
+            socket,
+            pool,
+            max_capacity: 40,
+        }
     }
 
     /// Check if any job/task is pending, if so, launch them.
@@ -44,10 +47,8 @@ impl SchedulerServer {
         //  * launch task with met dependancies
         let mut conn = self.pool.acquire().await?;
         // get running and pending jobs
-        let mut jobs = Job::select_by_status(&Status::Running, &mut conn)
-            .await?;
-        let pendings = Job::select_by_status(&Status::Pending, &mut conn)
-            .await?;
+        let mut jobs = Job::select_by_status(&Status::Running, &mut conn).await?;
+        let pendings = Job::select_by_status(&Status::Pending, &mut conn).await?;
         jobs.extend(pendings);
         // get the first one with available task
         for job in jobs {
@@ -55,7 +56,8 @@ impl SchedulerServer {
             if let Some(task) = batch.next_ready_task().await? {
                 // submit task
                 let task_id = task.id.ok_or(SchedulerServerError::NoSuchTask)?;
-                let handle = TaskHandle::spawn(&task.command, task_id, Some(self.socket.clone())).await?;
+                let handle =
+                    TaskHandle::spawn(&task.command, task_id, Some(self.socket.clone())).await?;
                 // update task
                 let mut running_task: Task = task.to_owned();
                 running_task.handle = handle.handle_string();
@@ -73,7 +75,11 @@ impl SchedulerServer {
     }
 
     /// fetch tasks by its handle, set its status, update its job status as well
-    async fn update_task_status(&self, handle: &str, task_status: &TaskStatus) -> Result<(), Box<dyn Error>> {
+    async fn update_task_status(
+        &self,
+        handle: &str,
+        task_status: &TaskStatus,
+    ) -> Result<(), Box<dyn Error>> {
         let mut conn = self.pool.acquire().await?;
         let mut task = Task::get_by_handle(handle, &mut conn).await?;
         task.status = Status::from_task_status(task_status);
@@ -89,7 +95,6 @@ impl SchedulerServer {
                     // if there is remaining tasks
                     // no need to update job staus
                     return Ok(());
-
                 }
             }
             job.status = task.status.clone();
@@ -103,29 +108,31 @@ impl SchedulerServer {
         let msg = ToSchedulerMsg::async_read_from(stream).await?;
         match msg {
             // update task status
-            ToSchedulerMsg::StatusUpdate { task_handle, status } => {
-                let task_handle: String = task_handle
-                    .into_os_string()
-                    .to_string_lossy()
-                    .to_string();
+            ToSchedulerMsg::StatusUpdate {
+                task_handle,
+                status,
+            } => {
+                let task_handle: String =
+                    task_handle.into_os_string().to_string_lossy().to_string();
                 // update task and job status
-                let _ = self.update_task_status(&task_handle, &status)
+                let _ = self
+                    .update_task_status(&task_handle, &status)
                     .await
                     .map_err(|e| format!("update error: {:?}", e))?;
                 // a new task ended, means we could potentially launch the ones that
                 // depended of it.
                 let _ = self.update_work_queue().await?;
-            },
+            }
             // Update work queue.
             ToSchedulerMsg::JobAppended => {
                 let _ = self.update_work_queue().await?;
-            },
+            }
         }
         Ok(())
     }
 
     pub fn client(&self) -> SchedulerClient {
-        SchedulerClient { 
+        SchedulerClient {
             socket: self.socket.clone(),
             pool: self.pool.clone(),
         }
@@ -133,13 +140,14 @@ impl SchedulerServer {
 
     /// Listen on a unix domain socket for monitors status update messages.
     /// Updates the Task status.
-    /// 
+    ///
     /// NOTE: Failure are only logged, this loop should live as long as the web server.
     pub fn start(self) {
         tokio::task::spawn(async move {
             // remove the socket file
             let _ = std::fs::remove_file(&self.socket);
-            let listener = UnixListener::bind(&self.socket).expect("Can bind to hypervisor socket.");
+            let listener =
+                UnixListener::bind(&self.socket).expect("Can bind to hypervisor socket.");
 
             loop {
                 match listener.accept().await {
@@ -148,16 +156,14 @@ impl SchedulerServer {
                             eprintln!("Error while processing update msg: {:?}", e);
                         }
                     }
-                    Err(e) => { 
+                    Err(e) => {
                         eprintln!(
                             "Connection to hypervisor socket '{:?}' failed: {:?}",
-                            &self.socket,
-                            e,
+                            &self.socket, e,
                         );
                     }
                 }
             }
         });
     }
-
 }

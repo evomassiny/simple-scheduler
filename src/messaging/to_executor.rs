@@ -10,7 +10,7 @@ use rocket::tokio::{
 };
 use std::path::{Path, PathBuf};
 
-use crate::messaging::sendable::{ByteSerializabe, AsyncSendable};
+use crate::messaging::sendable::{AsyncSendable, ByteSerializabe};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ExecutorQuery {

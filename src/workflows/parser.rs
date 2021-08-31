@@ -1,9 +1,7 @@
 #![allow(non_snake_case)]
-use serde::Deserialize;
+use crate::workflows::graph::{WorkFlowGraph, WorkFlowTask};
 use quick_xml::de::from_reader;
-use crate::workflows::graph::{
-    WorkFlowGraph,WorkFlowTask
-};
+use serde::Deserialize;
 use std::collections::HashMap;
 
 pub const CLUSTER_ATTRIBUTE_NAME: &str = "NODE_ACCESS_TOKEN";
@@ -14,7 +12,6 @@ pub const CLUSTER_ATTRIBUTE_NAME: &str = "NODE_ACCESS_TOKEN";
  *
  * Those types should only be used to create `crate::workflows::graph::WorkFlowGraph`s
  */
-
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Info {
@@ -68,7 +65,6 @@ pub struct Dependencies {
     pub tasks: Vec<TaskRef>,
 }
 
-
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Task {
     pub name: String,
@@ -78,7 +74,6 @@ pub struct Task {
     pub parallel: Option<Parallel>,
     #[serde(rename = "nativeExecutable")]
     pub executable: NativeExecutable,
-
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -95,17 +90,14 @@ pub struct Job {
 }
 
 impl Job {
-    pub fn from_str(job_str: &str) -> Result<Self, String>  {
+    pub fn from_str(job_str: &str) -> Result<Self, String> {
         from_reader(job_str.as_bytes()).map_err(|e| format!("Error while parsing job: {:?}", e))
     }
 }
 
-
 impl WorkFlowGraph {
-
-
     /// Build a WorkFlowTask from an XML string representation.
-    /// NOTE: 
+    /// NOTE:
     /// does not check for dependency cycles.
     pub fn from_str(workflow: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let job: Job = Job::from_str(workflow)?;
@@ -132,7 +124,7 @@ impl WorkFlowGraph {
                 }
             }
             dependency_indices.push(dependencies);
-            
+
             // collect node_count
             let mut node_count = 0;
             if let Some(parallel_info) = &task.parallel {
@@ -147,22 +139,22 @@ impl WorkFlowGraph {
             }
             // collect executable
             let executable = task.executable.command.value.clone();
-            let arguments = task.executable
+            let arguments = task
+                .executable
                 .command
                 .arguments
                 .arguments
-                .iter().map(|a| a.value.clone())
+                .iter()
+                .map(|a| a.value.clone())
                 .collect::<Vec<String>>();
-            
-            tasks.push(
-                WorkFlowTask {
-                    name: task.name.clone(),
-                    cluster_name: cluster_name,
-                    node_count: node_count,
-                    executable: executable,
-                    executable_arguments: arguments,
-                }
-            )
+
+            tasks.push(WorkFlowTask {
+                name: task.name.clone(),
+                cluster_name: cluster_name,
+                node_count: node_count,
+                executable: executable,
+                executable_arguments: arguments,
+            })
         }
 
         Ok(Self {
@@ -233,11 +225,23 @@ fn test_single_task_parsing() {
     let taskflow = WorkFlowGraph::from_str(JOB_STR).unwrap();
     assert_eq!(taskflow.name, String::from("job-name"));
     assert_eq!(taskflow.tasks[0].name, String::from("A"));
-    assert_eq!(taskflow.tasks[0].cluster_name, Some("cluster_name_1".into()));
+    assert_eq!(
+        taskflow.tasks[0].cluster_name,
+        Some("cluster_name_1".into())
+    );
     assert_eq!(taskflow.tasks[0].node_count, 20);
-    assert_eq!(taskflow.tasks[0].executable, String::from("executable_name"));
-    assert_eq!(taskflow.tasks[0].executable_arguments[0], String::from("argument_1"));
-    assert_eq!(taskflow.tasks[0].executable_arguments[1], String::from("argument_2"));
+    assert_eq!(
+        taskflow.tasks[0].executable,
+        String::from("executable_name")
+    );
+    assert_eq!(
+        taskflow.tasks[0].executable_arguments[0],
+        String::from("argument_1")
+    );
+    assert_eq!(
+        taskflow.tasks[0].executable_arguments[1],
+        String::from("argument_2")
+    );
 }
 
 #[test]
@@ -248,4 +252,3 @@ fn test_several_tasks_parsing() {
     // check dependencies
     assert_eq!(C_deps[0].name, String::from("A"));
 }
-

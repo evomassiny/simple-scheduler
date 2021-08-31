@@ -1,10 +1,9 @@
-use serde::{Deserialize, Serialize};
 use rocket::tokio::{
     fs::File,
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
 };
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-
 
 /// Represents all the states of a monitoree process
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -17,7 +16,6 @@ pub enum TaskStatus {
     Running,
 }
 impl TaskStatus {
-
     /// returns either or not the process is still running.
     pub fn is_terminated(&self) -> bool {
         match *self {
@@ -49,7 +47,6 @@ impl TaskStatus {
         let status: Self = serde_json::from_slice(&data)?;
         Ok(status)
     }
-
 }
 
 #[derive(Debug, Serialize, Deserialize)]
