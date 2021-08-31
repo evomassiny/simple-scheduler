@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::str::FromStr;
 
 #[derive(Debug)]
 pub enum WorkflowError {
@@ -156,6 +155,7 @@ impl WorkFlowGraph {
 
 #[test]
 fn test_cycle_detection() {
+    use std::str::FromStr;
     let di_graph = WorkFlowGraph::from_str(include_str!("../../test-data/workflow.xml")).unwrap();
     assert_eq!(di_graph.is_cycle_free(), true);
 
@@ -166,6 +166,7 @@ fn test_cycle_detection() {
 
 #[test]
 fn test_name_uniqueness() {
+    use std::str::FromStr;
     let di_graph = WorkFlowGraph::from_str(include_str!("../../test-data/workflow.xml")).unwrap();
     assert_eq!(di_graph.are_task_names_unique(), true);
 

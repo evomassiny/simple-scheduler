@@ -196,7 +196,6 @@ impl Monitor {
                         // read queries from the stream, ignore failures
                         match ExecutorQuery::read_from(&mut stream) {
                             Ok(query) => {
-                                dbg!(&query);
                                 self.process_query(query, &mut stream)?;
                             }
                             Err(e) => eprintln!("bad query: {:?}", e),

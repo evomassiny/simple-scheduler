@@ -10,6 +10,7 @@ extern crate tempfile;
 
 mod messaging;
 mod models;
+mod rest;
 mod scheduling;
 pub mod tasks;
 pub mod workflows;
@@ -17,35 +18,14 @@ pub mod workflows;
 use std::path::Path;
 
 use dotenv::dotenv;
-use rocket::{fs::TempFile, tokio, State};
+use rocket::tokio;
 use sqlx::sqlite::SqlitePoolOptions;
 
-use scheduling::{SchedulerClient, SchedulerServer};
+use scheduling::SchedulerServer;
 
 #[get("/")]
 async fn index() -> &'static str {
-    "Hello, world!"
-}
-
-#[get("/spawn")]
-async fn spawn(scheduler: &State<SchedulerClient>) -> String {
-    // build task DB object and get its id
-    let cmd: String = "sleep 30 && echo $(date)".to_string();
-    let scheduler = scheduler.inner();
-    scheduler
-        .submit_command_job("command_job", "task", &cmd)
-        .await
-        .expect("failed");
-    String::from("task successfully launched")
-}
-
-#[post("/submit", format = "application/xml", data = "<uploaded_file>")]
-async fn submit(scheduler: &State<SchedulerClient>, mut uploaded_file: TempFile<'_>) -> String {
-    let scheduler = scheduler.inner();
-    match scheduler.submit_from_tempfile(&mut uploaded_file).await {
-        Ok(job_id) => format!("Job {:?} successfully created", &job_id),
-        Err(error) => format!("Failed to create job: {:?}", error),
-    }
+    "Hello, world! there is no front-end. sry"
 }
 
 #[rocket::main]
@@ -74,7 +54,10 @@ async fn main() {
         .manage(pool)
         .manage(socket_path)
         .manage(scheduler_client)
-        .mount("/rest/scheduler/", routes![spawn, submit])
+        .mount(
+            "/rest/scheduler/",
+            routes![rest::job_status, rest::submit_job, rest::debug_spawn],
+        )
         .mount("/", routes![index])
         .launch()
         .await;
