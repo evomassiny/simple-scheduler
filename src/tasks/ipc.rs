@@ -1,11 +1,9 @@
 use nix::{
     errno::{errno, Errno},
     libc::{self},
-    sys::mman::{mmap, msync, munmap, MapFlags, MsFlags, ProtFlags},
+    sys::mman::{mmap, munmap, MapFlags, ProtFlags},
 };
-use std::io::{Read, Write};
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::os::unix::net::UnixStream;
+use std::os::unix::io::RawFd;
 
 /// Use this to block a process, until another one decides to release it.
 pub struct Barrier {
@@ -41,6 +39,7 @@ impl Barrier {
     /// # NOTE:
     /// It uses a POSIX semaphore intialized on a piece of memory
     /// shared across processes.
+    #[allow(clippy::unnecessary_cast)]
     pub fn new() -> Result<Self, String> {
         // SAFETY: safe because
         // * semaphore is allocated through `mmap()`
@@ -50,11 +49,11 @@ impl Barrier {
             // request the OS for a pointer to a piece of shared memory
             // big enough to hold a semaphore
             let semaphore_ptr = mmap(
-                0 as *mut core::ffi::c_void,
+                std::ptr::null_mut::<core::ffi::c_void>(), // NULL ptr
                 std::mem::size_of::<libc::sem_t>() as libc::size_t,
                 ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
                 MapFlags::MAP_ANONYMOUS | MapFlags::MAP_SHARED,
-                0 as RawFd,
+                0_i32 as RawFd,
                 0 as libc::off_t,
             )
             .map_err(|errno| format!("Failed to mmap semaphore: {:?}", errno))?;

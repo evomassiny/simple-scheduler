@@ -87,7 +87,7 @@ impl SchedulerServer {
 
         let mut job = Job::get_by_id(task.job, &mut conn).await?;
         if task.status.is_failure() {
-            job.status = task.status.clone();
+            job.status = task.status;
             let _ = job.update(&mut conn).await?;
         } else {
             for task in Task::select_by_job(task.job, &mut conn).await? {
@@ -97,7 +97,7 @@ impl SchedulerServer {
                     return Ok(());
                 }
             }
-            job.status = task.status.clone();
+            job.status = task.status;
             let _ = job.update(&mut conn).await?;
         }
         Ok(())

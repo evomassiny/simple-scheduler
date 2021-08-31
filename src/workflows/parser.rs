@@ -95,11 +95,13 @@ impl Job {
     }
 }
 
-impl WorkFlowGraph {
+impl std::str::FromStr for WorkFlowGraph {
+    type Err = Box<dyn std::error::Error>;
+
     /// Build a WorkFlowTask from an XML string representation.
     /// NOTE:
     /// does not check for dependency cycles.
-    pub fn from_str(workflow: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_str(workflow: &str) -> Result<Self, Self::Err> {
         let job: Job = Job::from_str(workflow)?;
 
         let mut dependency_indices: Vec<Vec<usize>> = Vec::new();
@@ -150,18 +152,18 @@ impl WorkFlowGraph {
 
             tasks.push(WorkFlowTask {
                 name: task.name.clone(),
-                cluster_name: cluster_name,
-                node_count: node_count,
-                executable: executable,
+                cluster_name,
+                node_count,
+                executable,
                 executable_arguments: arguments,
             })
         }
 
         Ok(Self {
             name: job.name,
-            tasks: tasks,
-            dependency_indices: dependency_indices,
-            name_to_idx: name_to_idx,
+            tasks,
+            dependency_indices,
+            name_to_idx,
         })
     }
 }
@@ -198,6 +200,7 @@ fn test_deserialization() {
 
 #[test]
 fn test_single_task_parsing() {
+    use std::str::FromStr;
     const JOB_STR: &str = r#"<?xml version="1.0"?>
 <job name="job-name">
   <taskFlow>
@@ -246,6 +249,7 @@ fn test_single_task_parsing() {
 
 #[test]
 fn test_several_tasks_parsing() {
+    use std::str::FromStr;
     const JOB_STR: &str = include_str!("../../test-data/workflow.xml");
     let taskflow = WorkFlowGraph::from_str(JOB_STR).unwrap();
     let C_deps: Vec<&WorkFlowTask> = taskflow.get_task_dependencies("C").unwrap();

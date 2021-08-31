@@ -13,7 +13,7 @@ pub enum ModelError {
     InvalidTaskName,
     DependencyCycle,
     ModelNotFound,
-    DBError(String),
+    DbError(String),
     ColumnError(String),
 }
 impl std::fmt::Display for ModelError {
@@ -78,10 +78,7 @@ impl Status {
     }
 
     pub fn is_pending(&self) -> bool {
-        match *self {
-            Self::Pending => true,
-            _ => false,
-        }
+        matches!(*self, Self::Pending)
     }
 
     pub fn is_finished(&self) -> bool {
@@ -138,7 +135,7 @@ impl Model for Job {
                 .bind(self.id.ok_or(ModelError::ModelNotFound)?)
                 .execute(conn)
                 .await
-                .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+                .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         Ok(())
     }
 
@@ -150,7 +147,7 @@ impl Model for Job {
                 .bind(self.status.as_u8())
                 .execute(conn)
                 .await
-                .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+                .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         let id = query_result.last_insert_rowid();
         self.id = Some(id);
         Ok(())
@@ -189,7 +186,7 @@ impl Job {
         while let Some(row) = rows
             .try_next()
             .await
-            .map_err(|e| ModelError::DBError(e.to_string()))?
+            .map_err(|e| ModelError::DbError(e.to_string()))?
         {
             jobs.push(Self {
                 id: row
@@ -259,7 +256,7 @@ impl Model for Task {
         .bind(self.id.ok_or(ModelError::ModelNotFound)?)
         .execute(conn)
         .await
-        .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+        .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         Ok(())
     }
 
@@ -274,7 +271,7 @@ impl Model for Task {
         .bind(&self.job)
         .execute(conn)
         .await
-        .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+        .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         let id = query_result.last_insert_rowid();
         self.id = Some(id);
         Ok(())
@@ -338,7 +335,7 @@ impl Task {
         while let Some(row) = rows
             .try_next()
             .await
-            .map_err(|e| ModelError::DBError(e.to_string()))?
+            .map_err(|e| ModelError::DbError(e.to_string()))?
         {
             let status_code = row
                 .try_get("status")
@@ -386,7 +383,7 @@ impl Model for TaskDependency {
                 .bind(self.id.ok_or(ModelError::ModelNotFound)?)
                 .execute(conn)
                 .await
-                .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+                .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         Ok(())
     }
 
@@ -398,7 +395,7 @@ impl Model for TaskDependency {
                 .bind(&self.parent)
                 .execute(conn)
                 .await
-                .map_err(|e| ModelError::DBError(format!("{:?}", e)))?;
+                .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         let id = query_result.last_insert_rowid();
         self.id = Some(id);
         Ok(())
@@ -423,7 +420,7 @@ impl TaskDependency {
         while let Some(row) = rows
             .try_next()
             .await
-            .map_err(|e| ModelError::DBError(e.to_string()))?
+            .map_err(|e| ModelError::DbError(e.to_string()))?
         {
             dependencies.push(Self {
                 id: row

@@ -14,14 +14,13 @@ mod scheduling;
 pub mod tasks;
 pub mod workflows;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use dotenv::dotenv;
 use rocket::{fs::TempFile, tokio, State};
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::SqlitePoolOptions;
 
 use scheduling::{SchedulerClient, SchedulerServer};
-use tasks::TaskHandle;
 
 #[get("/")]
 async fn index() -> &'static str {

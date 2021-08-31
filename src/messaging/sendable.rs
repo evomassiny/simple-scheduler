@@ -1,14 +1,10 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::convert::TryInto;
 use std::io::{Read, Write};
 
-use rocket::tokio::{
-    fs::File,
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-};
-use std::path::{Path, PathBuf};
+use rocket::tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Objects that can be serialized into bytes and parsed from bytes.
 pub trait ByteSerializabe {

@@ -107,10 +107,7 @@ impl TaskHandle {
 
     /// See if a PID file exists to guess if the task is running or not.
     pub async fn is_running(&self) -> bool {
-        match metadata(self.pid_file()).await {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        metadata(self.pid_file()).await.is_ok()
     }
 
     /// save task PID into `self.pid_file()` (as text).

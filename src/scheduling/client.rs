@@ -6,8 +6,11 @@ use rocket::fs::TempFile as RocketTempFile;
 use rocket::tokio::{self, fs::File, io::AsyncReadExt};
 use sqlx::sqlite::SqlitePool;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tempfile::NamedTempFile;
 
+/// Struct handling handling communication
+/// with the scheduler (eg: hypervisor).
 pub struct SchedulerClient {
     pub socket: PathBuf,
     pub pool: SqlitePool,
@@ -74,7 +77,7 @@ impl SchedulerClient {
     ) -> Result<i64, Box<dyn std::error::Error>> {
         // first persist the file
         // * use a NamedtempFile to get a free path
-        let file = tokio::task::spawn_blocking(move || NamedTempFile::new())
+        let file = tokio::task::spawn_blocking(NamedTempFile::new)
             .await
             .map_err(|_| {
                 std::io::Error::new(std::io::ErrorKind::BrokenPipe, "spawn_block panic")
