@@ -7,7 +7,7 @@ edition = "2018"
 
 [dependencies]
 # main server framework
-rocket = { git = "https://github.com/SergioBenitez/Rocket", branch = "master" }
+rocket = { git = "https://github.com/SergioBenitez/Rocket", branch = "master", features = [ "json" ] }
 # async sql queries
 sqlx = { version = "*", features = [ "runtime-tokio-rustls", "chrono", "sqlite", "migrate", "macros", "offline"] }
 

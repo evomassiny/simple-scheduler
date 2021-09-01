@@ -14,7 +14,7 @@
         <staticCommand value="bash">
           <arguments>
             <argument value="-c"/>
-            <argument value="echo A"/>
+            <argument value="sleep 5;  echo A"/>
           </arguments>
         </staticCommand>
       </nativeExecutable>
@@ -30,7 +30,7 @@
         <staticCommand value="bash">
           <arguments>
             <argument value="-c"/>
-            <argument value="echo B"/>
+            <argument value="sleep 5;  echo B"/>
           </arguments>
         </staticCommand>
       </nativeExecutable>
@@ -46,7 +46,7 @@
         <staticCommand value="bash">
           <arguments>
             <argument value="-c"/>
-            <argument value="echo C"/>
+            <argument value="sleep 5;  echo C"/>
           </arguments>
         </staticCommand>
       </nativeExecutable>

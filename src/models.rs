@@ -230,6 +230,23 @@ impl Job {
                 .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
         })
     }
+
+    pub async fn get_job_status_by_id(
+        id: i64,
+        conn: &mut SqliteConnection,
+    ) -> Result<Status, ModelError> {
+        let row = sqlx::query("SELECT status FROM jobs WHERE id = ?")
+            .bind(&id)
+            .fetch_one(conn)
+            .await
+            .map_err(|_| ModelError::ModelNotFound)?;
+        let status_code: u8 = row
+            .try_get("status")
+            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
+        let status = Status::from_u8(status_code)
+            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
+        Ok(status)
+    }
 }
 
 #[derive(Debug, Clone)]
