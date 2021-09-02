@@ -11,9 +11,10 @@ extern crate tempfile;
 mod messaging;
 mod models;
 mod rest;
+mod auth;
 mod scheduling;
-pub mod tasks;
-pub mod workflows;
+mod tasks;
+mod workflows;
 
 use std::path::Path;
 
@@ -54,7 +55,7 @@ async fn main() {
             "/rest/scheduler/",
             routes![rest::job_status, rest::submit_job, rest::debug_spawn],
         )
-        .mount("/", routes![index])
+        .mount("/", routes![index, auth::login])
         .launch()
         .await;
     assert!(result.is_ok());

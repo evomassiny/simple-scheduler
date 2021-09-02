@@ -12,7 +12,7 @@ job_id=$(echo "${out}" | jq .jobId)
 while true
 do
     date
-    status_json=$(curl -s -X GET "http://127.0.0.1:8000/rest/scheduler/submit/${job_id}")
+    status_json=$(curl -s -X GET "http://127.0.0.1:8000/rest/scheduler/jobs/${job_id}")
     [ $? ] || ( echo "${status_json}" && exit )
     echo "${status_json}" | jq .
     total=$(echo "${status_json}" | jq .jobInfo.totalNumberOfTasks )

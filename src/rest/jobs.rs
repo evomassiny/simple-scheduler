@@ -32,7 +32,7 @@ pub async fn submit_job(
 
 /// return status of jobs and related task
 /// (agglomerated sum of running, pending and succeed task).
-#[get("/submit/<job_id>")]
+#[get("/jobs/<job_id>")]
 pub async fn job_status(
     scheduler: &State<SchedulerClient>,
     job_id: i64,
