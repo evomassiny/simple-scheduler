@@ -8,10 +8,10 @@ extern crate serde_json;
 extern crate sqlx;
 extern crate tempfile;
 
+mod auth;
 mod messaging;
 mod models;
 mod rest;
-mod auth;
 mod scheduling;
 mod tasks;
 mod workflows;
@@ -53,9 +53,14 @@ async fn main() {
         .manage(scheduler_client)
         .mount(
             "/rest/scheduler/",
-            routes![rest::job_status, rest::submit_job, rest::debug_spawn],
+            routes![
+                rest::job_status,
+                rest::submit_job,
+                rest::debug_spawn,
+                auth::login
+            ],
         )
-        .mount("/", routes![index, auth::login])
+        .mount("/", routes![index])
         .launch()
         .await;
     assert!(result.is_ok());

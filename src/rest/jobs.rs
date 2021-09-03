@@ -2,31 +2,39 @@ use crate::models::{Job, Status};
 use crate::scheduling::SchedulerClient;
 use crate::sqlx::Row;
 use rocket::{
+    form::Form,
     fs::TempFile,
+    futures::TryStreamExt,
     http::Status as HttpStatus,
     response::status::{Custom, NotFound},
     serde::json::{json, Value as JsonValue},
     State,
 };
 use sqlx::sqlite::SqliteConnection;
+use std::collections::HashMap;
+
+#[derive(FromForm)]
+pub struct WorkflowForm<'r> {
+    file: TempFile<'r>,
+}
 
 /// Parse a Workflow file from an uploaded XML,
 /// submit it as a new (batch) job,
 /// and return its ID.
-#[post("/submit", format = "application/xml", data = "<uploaded_file>")]
+#[post("/submit", format = "multipart/form-data", data = "<uploaded_file>")]
 pub async fn submit_job(
     scheduler: &State<SchedulerClient>,
-    mut uploaded_file: TempFile<'_>,
+    mut uploaded_file: Form<WorkflowForm<'_>>,
 ) -> Result<JsonValue, Custom<String>> {
     let scheduler = scheduler.inner();
     // submit job
     let job_id = scheduler
-        .submit_from_tempfile(&mut uploaded_file)
+        .submit_from_tempfile(&mut uploaded_file.file)
         .await
         .map_err(|e| Custom(HttpStatus::InternalServerError, e.to_string()))?;
 
     Ok(json!({
-        "jobId": job_id,
+        "id": job_id,
     }))
 }
 
@@ -45,17 +53,10 @@ pub async fn job_status(
         .await
         .map_err(|e| NotFound(e.to_string()))?;
 
-    let status: &str = match Job::get_job_status_by_id(job_id, &mut conn)
+    let status: String = Job::get_job_status_by_id(job_id, &mut conn)
         .await
         .map_err(|e| NotFound(e.to_string()))?
-    {
-        Status::Pending => "PENDING",
-        Status::Stopped => "PAUSED",
-        Status::Killed => "KILLED",
-        Status::Failed => "FAILED",
-        Status::Succeed => "FINISHED",
-        Status::Running => "RUNNING",
-    };
+        .as_proactive_string();
 
     let row = sqlx::query(
         "SELECT COUNT(*) AS total_count, \
@@ -85,7 +86,29 @@ pub async fn job_status(
         .try_get("running_count")
         .map_err(|e| NotFound(e.to_string()))?;
 
-    // mimicking proactive responce
+    // fetch status for each tasks
+    let mut rows = sqlx::query("SELECT name, status FROM tasks WHERE job = ?")
+        .bind(&job_id)
+        .fetch(&mut conn);
+    let mut task_details: HashMap<String, JsonValue> = HashMap::new();
+
+    while let Some(row) = rows.try_next().await.map_err(|e| NotFound(e.to_string()))? {
+        // fetch name
+        let name: String = row.try_get("name").map_err(|e| NotFound(e.to_string()))?;
+        // fetch status, build a string from it
+        let status_code: u8 = row.try_get("status").map_err(|e| NotFound(e.to_string()))?;
+        let status: String = Status::from_u8(status_code)
+            .map_err(|e| NotFound(e.to_string()))?
+            .as_proactive_string();
+        task_details.insert(
+            name,
+            json!({
+                    "taskInfo": { "taskStatus": status }
+            }),
+        );
+    }
+
+    // mimicks proactive API
     Ok(json!({
         "jobInfo": {
             "jobId": job_id,
@@ -94,7 +117,8 @@ pub async fn job_status(
             "numberOfPendingTasks": pending_tasks_count,
             "numberOfRunningTasks": running_tasks_count,
             "totalNumberOfTasks": total_count,
-        }
+        },
+        "tasks": task_details,
     }))
 }
 

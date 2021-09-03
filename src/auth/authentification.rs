@@ -3,17 +3,17 @@ use crate::sqlx::Row;
 use rocket::{
     fs::TempFile,
     State,
+    form::Form,
 };
 use sqlx::sqlite::SqliteConnection;
 
-/// Parse a Workflow file from an uploaded XML,
-/// submit it as a new (batch) job,
-/// and return its ID.
-#[post("/submit", format = "text/plain", data = "<cred>")]
-pub async fn login(
-    _scheduler: &State<SchedulerClient>,
-    mut cred: TempFile<'_>,
-) -> &'static str {
+#[derive(FromForm)]
+pub struct CredentialFileForm<'r> {
+    credential: TempFile<'r>,
+}
+
+#[post("/login", data = "<credential>")]
+pub async fn login(mut credential: Form<CredentialFileForm<'_>>,) -> &'static str {
     "TODO"
 }
 

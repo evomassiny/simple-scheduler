@@ -114,6 +114,17 @@ impl Status {
             Self::Running => 5,
         }
     }
+
+    pub fn as_proactive_string(&self) -> String {
+        match *self {
+            Self::Pending => "PENDING".to_string(),
+            Self::Stopped => "PAUSED".to_string(),
+            Self::Killed => "KILLED".to_string(),
+            Self::Failed => "FAILED".to_string(),
+            Self::Succeed => "FINISHED".to_string(),
+            Self::Running => "RUNNING".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
