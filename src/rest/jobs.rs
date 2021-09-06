@@ -122,6 +122,27 @@ pub async fn job_status(
     }))
 }
 
+/// Request to kill job.
+#[put("/jobs/<job_id>/kill")]
+pub async fn kill_job(
+    scheduler: &State<SchedulerClient>,
+    job_id: i64,
+) -> Result<JsonValue, Custom<String>> {
+    let scheduler = scheduler.inner();
+
+    scheduler.kill_job(job_id)
+        .await
+        .map_err(|e| Custom(HttpStatus::InternalServerError, e.to_string()))?;
+
+    // mimicks proactive API
+    Ok(json!({
+        "jobInfo": {
+            "jobId": job_id,
+            "status": Status::Killed.as_proactive_string(),
+        },
+    }))
+}
+
 #[get("/spawn")]
 pub async fn debug_spawn(scheduler: &State<SchedulerClient>) -> String {
     // build task DB object and get its id

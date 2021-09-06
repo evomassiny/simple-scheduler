@@ -53,4 +53,5 @@ pub enum ToSchedulerMsg {
         status: TaskStatus,
     },
     JobAppended,
+    KillJob(i64),
 }

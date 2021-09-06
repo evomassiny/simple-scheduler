@@ -2,10 +2,12 @@ use crate::messaging::TaskStatus;
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
 use crate::workflows::WorkFlowGraph;
+use crate::tasks::TaskHandle;
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use sqlx::sqlite::SqliteConnection;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum ModelError {
@@ -46,12 +48,20 @@ pub trait Model {
 /// State of job/task
 #[derive(Debug, Clone, Copy)]
 pub enum Status {
+    /// waiting to be scheduled
     Pending,
+    /// started then stopped
     Stopped,
+    /// killed (sigkill)
     Killed,
+    /// returned error status
     Failed,
+    /// ran successfully
     Succeed,
+    /// currently scheduled
     Running,
+    /// killed before being scheduled
+    Canceled,
 }
 
 impl Status {
@@ -74,6 +84,7 @@ impl Status {
             Self::Failed => true,
             Self::Succeed => false,
             Self::Running => false,
+            Self::Canceled => true,
         }
     }
 
@@ -89,6 +100,7 @@ impl Status {
             Self::Failed => true,
             Self::Succeed => true,
             Self::Running => false,
+            Self::Canceled => true,
         }
     }
 
@@ -100,6 +112,7 @@ impl Status {
             3 => Ok(Self::Failed),
             4 => Ok(Self::Succeed),
             5 => Ok(Self::Running),
+            6 => Ok(Self::Canceled),
             v => Err(format!("'{:}' cannot be converted to a Status", v)),
         }
     }
@@ -112,6 +125,7 @@ impl Status {
             Self::Failed => 3,
             Self::Succeed => 4,
             Self::Running => 5,
+            Self::Canceled => 6,
         }
     }
 
@@ -123,6 +137,7 @@ impl Status {
             Self::Failed => "FAILED".to_string(),
             Self::Succeed => "FINISHED".to_string(),
             Self::Running => "RUNNING".to_string(),
+            Self::Canceled => "CANCELED".to_string(),
         }
     }
 }
@@ -389,6 +404,11 @@ impl Task {
             });
         }
         Ok(tasks)
+    }
+
+    /// Return an handle to the process task represented by self.
+    pub fn handle(&self) -> TaskHandle {
+        TaskHandle { directory: PathBuf::from(&self.handle) }
     }
 }
 

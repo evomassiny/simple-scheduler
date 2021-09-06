@@ -56,6 +56,7 @@ async fn main() {
             routes![
                 rest::job_status,
                 rest::submit_job,
+                rest::kill_job,
                 rest::debug_spawn,
                 auth::login
             ],

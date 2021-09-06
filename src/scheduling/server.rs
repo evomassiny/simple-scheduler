@@ -1,4 +1,4 @@
-use crate::messaging::{AsyncSendable, TaskStatus, ToSchedulerMsg};
+use crate::messaging::{AsyncSendable, TaskStatus, ToClientMsg, RequestResult, ToSchedulerMsg};
 use crate::models::Model;
 use crate::models::{Batch, Job, Status, Task};
 use crate::tasks::TaskHandle;
@@ -103,6 +103,36 @@ impl SchedulerServer {
         Ok(())
     }
 
+    async fn kill_job(&self, job_id: i64) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = self.pool.acquire().await?;
+        // update job status
+        let mut job = Job::get_by_id(job_id, &mut conn).await?;
+        job.status = Status::Killed;
+        let _ = job.update(&mut conn).await?;
+        
+        // iter all job task,
+        // kill the running ones and mark the status of
+        // the others as "Canceled"
+        for mut task in Task::select_by_job(job_id, &mut conn).await? {
+            match task.status {
+                Status::Running => {
+                    let handle = task.handle();
+                    handle.kill().await?;
+                    // do not update task status,
+                    // this will be done after the monitor process sends
+                    // its status update.
+                }
+                Status::Pending => {
+                    task.status = Status::Canceled;
+                    task.update(&mut conn).await?;
+                }
+                _ => continue,
+            }
+        }
+
+        Ok(())
+    }
+
     /// Read a task status update from a monitor process through `stream`.
     async fn process_msg(&self, stream: &mut UnixStream) -> Result<(), Box<dyn Error>> {
         let msg = ToSchedulerMsg::async_read_from(stream).await?;
@@ -126,6 +156,16 @@ impl SchedulerServer {
             // Update work queue.
             ToSchedulerMsg::JobAppended => {
                 let _ = self.update_work_queue().await?;
+            }
+            // Kill very task of a job
+            ToSchedulerMsg::KillJob(job_id) => {
+                // kill job
+                let res: ToClientMsg = match self.kill_job(job_id).await {
+                    Ok(_) => ToClientMsg::RequestResult(RequestResult::Ok),
+                    Err(error) => ToClientMsg::RequestResult(RequestResult::Err(error.to_string())),
+                };
+                // send murder status back to client
+                res.async_send_to(stream).await?;
             }
         }
         Ok(())

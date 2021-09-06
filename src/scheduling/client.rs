@@ -1,4 +1,4 @@
-use crate::messaging::{AsyncSendable, ToSchedulerMsg};
+use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
 use crate::models::{Batch, ModelError};
 use crate::tokio::net::UnixStream;
 use crate::workflows::WorkFlowGraph;
@@ -9,6 +9,19 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tempfile::NamedTempFile;
 
+#[derive(Debug)]
+pub enum SchedulerClientError {
+    KillFailed(String),
+    SchedulerConnectionError,
+    RequestSendingError,
+}
+impl std::fmt::Display for SchedulerClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SchedulerClientError {:?}", &self)
+    }
+}
+impl std::error::Error for SchedulerClientError {}
+
 /// Struct handling handling communication
 /// with the scheduler (eg: hypervisor).
 pub struct SchedulerClient {
@@ -17,10 +30,10 @@ pub struct SchedulerClient {
 }
 
 impl SchedulerClient {
-    pub async fn connect_to_scheduler(&self) -> Result<UnixStream, String> {
+    pub async fn connect_to_scheduler(&self) -> Result<UnixStream, SchedulerClientError> {
         UnixStream::connect(&self.socket)
             .await
-            .map_err(|_| format!("Could not open hypervisor socket {:?}", &self.socket))
+            .map_err(|_| SchedulerClientError::SchedulerConnectionError)
     }
 
     /// Submit a Job with a single task: a shell command
@@ -87,5 +100,30 @@ impl SchedulerClient {
 
         let job_id = self.submit_workflow(file.path()).await?;
         Ok(job_id)
+    }
+
+    pub async fn kill_job(&self, job_id: i64) -> Result<(), SchedulerClientError> {
+        let mut to_hypervisor = self
+            .connect_to_scheduler()
+            .await
+            .map_err(|_| SchedulerClientError::SchedulerConnectionError)?;
+        let _ = ToSchedulerMsg::KillJob(job_id)
+            .async_send_to(&mut to_hypervisor)
+            .await
+            .map_err(|_| SchedulerClientError::RequestSendingError)?;
+        let request_result = ToClientMsg::async_read_from(&mut to_hypervisor)
+            .await
+            .map_err(|_| SchedulerClientError::SchedulerConnectionError)?;
+        match request_result {
+            ToClientMsg::RequestResult(rr) => match rr {
+                RequestResult::Ok => Ok(()),
+                RequestResult::Err(error) => {
+                    Err(SchedulerClientError::KillFailed(error.to_string()))
+                }
+            },
+            _ => Err(SchedulerClientError::KillFailed(
+                "unexpected query result".to_string(),
+            )),
+        }
     }
 }
