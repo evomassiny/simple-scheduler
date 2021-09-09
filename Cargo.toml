@@ -20,3 +20,4 @@ bincode = "*" # serialization to bytes
 quick-xml = { version = "*", features = [ "serialize" ] }  # XML reader, with serde support
 async-trait = "*"
 tempfile = "*"
+zip = "*" # sync only so far

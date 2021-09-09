@@ -7,6 +7,7 @@ extern crate serde;
 extern crate serde_json;
 extern crate sqlx;
 extern crate tempfile;
+extern crate zip;
 
 mod auth;
 mod messaging;

@@ -6,7 +6,7 @@ from time import sleep
 repo_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # dummy
-cred_path = os.path.join(repo_directory, "utils", "auth-test.py")
+cred_path = os.path.join(repo_directory, "utils", os.path.basename(__file__))
 
 print("mockup login")
 session = Session()
@@ -24,6 +24,7 @@ with open(workflow_path, "rb") as workflow_fd:
         "http://127.0.0.1:8000/rest/scheduler/submit/",
         files={"file": ("workflow.xml", workflow_fd, "application/xml")},
     )
+    pprint(response.text)
     data = response.json()
     pprint(data)
     print()

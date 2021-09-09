@@ -23,8 +23,11 @@ impl std::fmt::Display for SchedulerServerError {
 }
 impl std::error::Error for SchedulerServerError {}
 
+/// Hypervisor state
 pub struct SchedulerServer {
+    /// path to the UNIX socket this hypervisor is bound to
     socket: PathBuf,
+    /// Database pool (contains tasks/jobs states)
     pool: SqlitePool,
     /// max number number of parallel running tasks
     max_capacity: usize,
@@ -70,7 +73,6 @@ impl SchedulerServer {
                 let _ = handle.start().await?;
             }
         }
-
         Ok(())
     }
 
@@ -103,6 +105,7 @@ impl SchedulerServer {
         Ok(())
     }
 
+    /// Ask each monitor process to SIGKILL its monitoree task
     async fn kill_job(&self, job_id: i64) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = self.pool.acquire().await?;
         // update job status
@@ -171,6 +174,7 @@ impl SchedulerServer {
         Ok(())
     }
 
+    /// Build a `SchedulerClient`
     pub fn client(&self) -> SchedulerClient {
         SchedulerClient {
             socket: self.socket.clone(),
@@ -193,6 +197,7 @@ impl SchedulerServer {
                 match listener.accept().await {
                     Ok((mut stream, _addr)) => {
                         if let Err(e) = self.process_msg(&mut stream).await {
+                            // TODO: use syslog or rocket's own logging utility
                             eprintln!("Error while processing update msg: {:?}", e);
                         }
                     }
