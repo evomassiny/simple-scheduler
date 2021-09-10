@@ -1,6 +1,6 @@
 use crate::messaging::{AsyncSendable, ExecutorQuery, TaskStatus};
 use nix::unistd::Pid;
-use rocket::tokio::{fs::metadata, fs::File, io::AsyncReadExt, net::UnixStream};
+use rocket::tokio::{fs::{File,metadata,remove_dir_all}, io::AsyncReadExt, net::UnixStream};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -48,6 +48,22 @@ impl TaskHandle {
     /// file containing the error output of a monitored process
     pub fn stderr_file(&self) -> PathBuf {
         self.directory.join(&PROCESS_STDERR_FILE_NAME)
+    }
+
+    /// read whole stderr file into string
+    pub async fn read_stderr(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut file = File::open(self.stderr_file()).await?;
+        let mut stderr_content: String = String::new();
+        file.read_to_string(&mut stderr_content).await?;
+        Ok(stderr_content)
+    }
+
+    /// read whole stdout file into string
+    pub async fn read_stdout(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let mut file = File::open(self.stdout_file()).await?;
+        let mut stdout_content: String = String::new();
+        file.read_to_string(&mut stdout_content).await?;
+        Ok(stdout_content)
     }
 
     /// file containing the standard output of a monitored process
@@ -175,5 +191,16 @@ impl TaskHandle {
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
         ExecutorQuery::GetStatus.async_send_to(&mut sock).await?;
         TaskStatus::async_read_from(&mut sock).await
+    }
+
+    /// Remove the process handle directory containing:
+    /// * stderr file,
+    /// * stdout file,
+    /// * status file,
+    /// * PID file,
+    /// * cwd directory
+    pub async fn cleanup(self) -> Result<(), Box<dyn std::error::Error>> {
+        remove_dir_all(&self.directory).await?;
+        Ok(())
     }
 }

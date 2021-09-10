@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS tasks (
       handle VARCHAR(512) NOT NULL DEFAULT "",
       status TINYINT NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5, 6)),
       command TEXT NOT NULL,
+      stderr TEXT DEFAULT NULL,
+      stdout TEXT DEFAULT NULL,
       job INTEGER,
       FOREIGN KEY(job) REFERENCES jobs(id) -- jobs pk constraint
 );

@@ -2,6 +2,7 @@ import os.path
 from pprint import pprint
 from requests import Session
 from time import sleep
+from zipfile import ZIP_DEFLATED, ZipFile
 
 repo_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,17 +19,23 @@ with open(cred_path, "rb") as cred_fd:
 
 # submit job
 workflow_path = os.path.join(repo_directory, "utils", "echo-workflow.xml")
+zip_file = workflow_path.replace(".xml", ".zip")
+
 print("submit", workflow_path)
 with open(workflow_path, "rb") as workflow_fd:
+
+    with ZipFile(zip_file, 'w', compression=ZIP_DEFLATED) as zf:
+        zf.writestr("job.xml", workflow_fd.read())
+
+with open(zip_file, "rb") as zip_fd:
     response = session.post(
         "http://127.0.0.1:8000/rest/scheduler/submit/",
-        files={"file": ("workflow.xml", workflow_fd, "application/xml")},
+        files={"file": (os.path.basename(zip_file), zip_fd, "application/zip")},
     )
     pprint(response.text)
     data = response.json()
     pprint(data)
     print()
-
 
 job_id = data['id']
 print("get status")

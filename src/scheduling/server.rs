@@ -1,4 +1,4 @@
-use crate::messaging::{AsyncSendable, TaskStatus, ToClientMsg, RequestResult, ToSchedulerMsg};
+use crate::messaging::{AsyncSendable, RequestResult, TaskStatus, ToClientMsg, ToSchedulerMsg};
 use crate::models::Model;
 use crate::models::{Batch, Job, Status, Task};
 use crate::tasks::TaskHandle;
@@ -76,8 +76,11 @@ impl SchedulerServer {
         Ok(())
     }
 
-    /// fetch tasks by its handle, set its status, update its job status as well
-    async fn update_task_status(
+    /// fetch task by its handle, then:
+    /// * set its status,
+    /// * update its job status as well (if no other task are reamining)
+    /// * if the task is finished, load its stderr/stdout, then remove its handle directory
+    async fn update_task_state(
         &self,
         handle: &str,
         task_status: &TaskStatus,
@@ -85,6 +88,15 @@ impl SchedulerServer {
         let mut conn = self.pool.acquire().await?;
         let mut task = Task::get_by_handle(handle, &mut conn).await?;
         task.status = Status::from_task_status(task_status);
+
+        if task.status.is_finished() {
+            let task_handle = task.handle();
+            // read and store stderr, and stdout
+            task.stderr = Some(task_handle.read_stderr().await?);
+            task.stdout = Some(task_handle.read_stdout().await?);
+            // Clean-up file system
+            task_handle.cleanup().await?;
+        }
         let _ = task.update(&mut conn).await?;
 
         let mut job = Job::get_by_id(task.job, &mut conn).await?;
@@ -112,7 +124,7 @@ impl SchedulerServer {
         let mut job = Job::get_by_id(job_id, &mut conn).await?;
         job.status = Status::Killed;
         let _ = job.update(&mut conn).await?;
-        
+
         // iter all job task,
         // kill the running ones and mark the status of
         // the others as "Canceled"
@@ -149,7 +161,7 @@ impl SchedulerServer {
                     task_handle.into_os_string().to_string_lossy().to_string();
                 // update task and job status
                 let _ = self
-                    .update_task_status(&task_handle, &status)
+                    .update_task_state(&task_handle, &status)
                     .await
                     .map_err(|e| format!("update error: {:?}", e))?;
                 // a new task ended, means we could potentially launch the ones that

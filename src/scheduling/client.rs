@@ -5,11 +5,11 @@ use crate::workflows::WorkFlowGraph;
 use rocket::fs::TempFile as RocketTempFile;
 use rocket::http::ContentType;
 use rocket::tokio::{self, fs::File, io::AsyncReadExt};
-use zip::ZipArchive;
 use sqlx::sqlite::SqlitePool;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tempfile::NamedTempFile;
+use zip::ZipArchive;
 
 #[derive(Debug)]
 pub enum SchedulerClientError {
@@ -95,41 +95,52 @@ impl SchedulerClient {
             })??;
         // * move the tempfile content to it
         uploaded_file.persist_to(file.path()).await?;
-        
+
         // Content-type prepended with "application"
         // some app use "xml", some use "application/xml"
         let xml_type: ContentType = ContentType::new("application", "xml");
         // same for zip
         let zip_type: ContentType = ContentType::new("application", "zip");
 
-
         // check if the file is a ZIP archive, if so, unzip it first
         let file_content: String = match uploaded_file.content_type() {
-            Some(content_type) if *content_type == ContentType::XML || *content_type == xml_type => {
-                    // read file content
-                    let mut file = File::open(&file.path()).await?; // because file.path() == uploaded_file.path().unwrap()
-                    let mut content: String = String::new();
-                    file.read_to_string(&mut content).await?;
-                    content
-            },
-            Some(content_type) if *content_type == ContentType::ZIP || *content_type == zip_type => {
+            Some(content_type)
+                if *content_type == ContentType::XML || *content_type == xml_type =>
+            {
+                // read file content
+                let mut file = File::open(&file.path()).await?; // because file.path() == uploaded_file.path().unwrap()
+                let mut content: String = String::new();
+                file.read_to_string(&mut content).await?;
+                content
+            }
+            Some(content_type)
+                if *content_type == ContentType::ZIP || *content_type == zip_type =>
+            {
                 // unzip and read content
-                let unzipped_content = tokio::task::spawn_blocking( move || -> Result<String, Box<SchedulerClientError>> {
-                    use std::io::Read;
-                    let zipped_file = std::fs::File::open(&file.path()).map_err(|_| SchedulerClientError::BadInputFile)?;
-                    let mut archive = zip::ZipArchive::new(zipped_file).map_err(|_| SchedulerClientError::BadInputFile)?;
-                    let mut file = archive.by_index(0).map_err(|_| SchedulerClientError::BadInputFile)?;
+                let unzipped_content = tokio::task::spawn_blocking(
+                    move || -> Result<String, Box<SchedulerClientError>> {
+                        use std::io::Read;
+                        let zipped_file = std::fs::File::open(&file.path())
+                            .map_err(|_| SchedulerClientError::BadInputFile)?;
+                        let mut archive = zip::ZipArchive::new(zipped_file)
+                            .map_err(|_| SchedulerClientError::BadInputFile)?;
+                        let mut file = archive
+                            .by_index(0)
+                            .map_err(|_| SchedulerClientError::BadInputFile)?;
 
-                    let mut content = String::new();
-                    file.read_to_string(&mut content).map_err(|_| SchedulerClientError::BadInputFile)?;
-                    Ok(content)
-                }).await??;
+                        let mut content = String::new();
+                        file.read_to_string(&mut content)
+                            .map_err(|_| SchedulerClientError::BadInputFile)?;
+                        Ok(content)
+                    },
+                )
+                .await??;
                 unzipped_content
-            },
+            }
             Some(content_type) => {
                 println!("{:?}", content_type);
-                return Err(Box::new(SchedulerClientError::BadInputFile))
-            },
+                return Err(Box::new(SchedulerClientError::BadInputFile));
+            }
             _ => return Err(Box::new(SchedulerClientError::BadInputFile)),
         };
 
@@ -137,6 +148,7 @@ impl SchedulerClient {
         Ok(job_id)
     }
 
+    /// Tells the hypervisor to SIGKILL the job `job_id`
     pub async fn kill_job(&self, job_id: i64) -> Result<(), SchedulerClientError> {
         let mut to_hypervisor = self
             .connect_to_scheduler()

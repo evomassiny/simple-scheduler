@@ -282,6 +282,8 @@ pub struct Task {
     pub status: Status,
     pub handle: String,
     pub command: String,
+    pub stderr: Option<String>,
+    pub stdout: Option<String>,
     pub job: i64,
 }
 
@@ -289,13 +291,18 @@ pub struct Task {
 impl Model for Task {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(
-            "UPDATE tasks SET name = ?, status = ?, handle = ?, command = ?, job = ? WHERE id = ?",
+            "UPDATE tasks \
+            SET name = ?, status = ?, handle = ?, \
+            command = ?, job = ?, stderr = ?, stdout = ? \
+            WHERE id = ?",
         )
         .bind(&self.name)
         .bind(self.status.as_u8())
         .bind(&self.handle)
         .bind(&self.command)
         .bind(&self.job)
+        .bind(&self.stderr)
+        .bind(&self.stdout)
         .bind(self.id.ok_or(ModelError::ModelNotFound)?)
         .execute(conn)
         .await
@@ -305,7 +312,8 @@ impl Model for Task {
 
     async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let query_result = sqlx::query(
-            "INSERT INTO tasks (name, status, handle, command, job) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (name, status, handle, command, job) \
+            VALUES (?, ?, ?, ?, ?)",
         )
         .bind(&self.name)
         .bind(self.status.as_u8())
@@ -332,7 +340,8 @@ impl Task {
         conn: &mut SqliteConnection,
     ) -> Result<Self, ModelError> {
         let row = sqlx::query(
-            "SELECT id, name, status, handle, command, job FROM tasks WHERE handle = ?",
+            "SELECT id, name, status, handle, command, job, stderr, stdout \
+            FROM tasks WHERE handle = ?",
         )
         .bind(&handle)
         .fetch_one(conn)
@@ -361,6 +370,12 @@ impl Task {
             job: row
                 .try_get("job")
                 .map_err(|_| ModelError::ColumnError("job".to_string()))?,
+            stderr: row
+                .try_get("stderr")
+                .map_err(|_| ModelError::ColumnError("job".to_string()))?,
+            stdout: row
+                .try_get("stdout")
+                .map_err(|_| ModelError::ColumnError("job".to_string()))?,
         })
     }
 
@@ -370,9 +385,10 @@ impl Task {
         conn: &mut SqliteConnection,
     ) -> Result<Vec<Self>, ModelError> {
         let mut tasks: Vec<Task> = Vec::new();
-        let mut rows =
-            sqlx::query("SELECT id, name, status, handle, command FROM tasks WHERE job = ?")
-                .bind(&job_id)
+        let mut rows = sqlx::query(
+                "SELECT id, name, status, handle, command, stderr, stdout \
+                FROM tasks WHERE job = ?"
+                ).bind(&job_id)
                 .fetch(conn);
 
         while let Some(row) = rows
@@ -401,6 +417,12 @@ impl Task {
                     .map_err(|_| ModelError::ColumnError("command".to_string()))?,
                 job: job_id,
                 status,
+                stderr: row
+                    .try_get("stderr")
+                    .map_err(|_| ModelError::ColumnError("command".to_string()))?,
+                stdout: row
+                    .try_get("stdout")
+                    .map_err(|_| ModelError::ColumnError("command".to_string()))?,
             });
         }
         Ok(tasks)
@@ -520,6 +542,8 @@ impl Batch {
             handle: "".to_string(),
             command: cmd.to_string(),
             job: job_id,
+            stdout: None,
+            stderr: None,
         };
         let _ = task.save(conn).await?;
 
@@ -557,6 +581,8 @@ impl Batch {
                 handle: "".to_string(),
                 command: graph_task.command(),
                 job: job_id,
+                stdout: None,
+                stderr: None,
             };
             let _ = task.save(conn).await?;
             tasks.push(task);
