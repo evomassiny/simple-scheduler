@@ -44,33 +44,42 @@ impl SchedulerServer {
 
     /// Check if any job/task is pending, if so, launch them.
     async fn update_work_queue(&self) -> Result<(), Box<dyn Error>> {
+        let mut conn = self.pool.acquire().await?;
+        let mut running_task_count: usize =
+            Task::count_by_status(&Status::Running, &mut conn).await?;
         // select all pending/running job
         // for each, select all associated tasks
         //  * if all are finished set job as Finished
         //  * launch task with met dependancies
-        let mut conn = self.pool.acquire().await?;
-        // get running and pending jobs
         let mut jobs = Job::select_by_status(&Status::Running, &mut conn).await?;
         let pendings = Job::select_by_status(&Status::Pending, &mut conn).await?;
         jobs.extend(pendings);
-        // get the first one with available task
-        for job in jobs {
+        'job_loop: for job in jobs {
             let mut batch = Batch::from_job(job, &mut conn).await?;
-            if let Some(task) = batch.next_ready_task().await? {
-                // submit task
-                let task_id = task.id.ok_or(SchedulerServerError::NoSuchTask)?;
-                let handle =
-                    TaskHandle::spawn(&task.command, task_id, Some(self.socket.clone())).await?;
-                // update task
-                let mut running_task: Task = task.to_owned();
-                running_task.handle = handle.handle_string();
-                running_task.status = Status::Running;
-                let _ = running_task.update(&mut conn).await?;
-                // update job
-                batch.job.status = Status::Running;
-                let _ = batch.job.update(&mut conn).await?;
-                // start task
-                let _ = handle.start().await?;
+            'task_loop: loop {
+                // bail if all running slots are taken
+                if running_task_count == self.max_capacity {
+                    break 'job_loop;
+                }
+                if let Some(task) = batch.next_ready_task().await? {
+                    // submit task
+                    let task_id = task.id.ok_or(SchedulerServerError::NoSuchTask)?;
+                    let handle =
+                        TaskHandle::spawn(&task.command, task_id, Some(self.socket.clone()))
+                            .await?;
+                    // update task
+                    task.handle = handle.handle_string();
+                    task.status = Status::Running;
+                    let _ = task.update(&mut conn).await?;
+                    batch.job.status = Status::Running;
+                    let _ = batch.job.update(&mut conn).await?;
+                    // start task
+                    let _ = handle.start().await?;
+                    // update number of running tasks
+                    running_task_count += 1;
+                } else {
+                    break 'task_loop;
+                }
             }
         }
         Ok(())
@@ -78,7 +87,7 @@ impl SchedulerServer {
 
     /// fetch task by its handle, then:
     /// * set its status,
-    /// * update its job status as well (if no other task are reamining)
+    /// * update its job status as well (if no other task are remaining)
     /// * if the task is finished, load its stderr/stdout, then remove its handle directory
     async fn update_task_state(
         &self,
@@ -152,7 +161,7 @@ impl SchedulerServer {
     async fn process_msg(&self, stream: &mut UnixStream) -> Result<(), Box<dyn Error>> {
         let msg = ToSchedulerMsg::async_read_from(stream).await?;
         match msg {
-            // update task status
+            // update task status from the task monitor
             ToSchedulerMsg::StatusUpdate {
                 task_handle,
                 status,

@@ -1,8 +1,8 @@
 use crate::messaging::TaskStatus;
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
-use crate::workflows::WorkFlowGraph;
 use crate::tasks::TaskHandle;
+use crate::workflows::WorkFlowGraph;
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use sqlx::sqlite::SqliteConnection;
@@ -386,10 +386,11 @@ impl Task {
     ) -> Result<Vec<Self>, ModelError> {
         let mut tasks: Vec<Task> = Vec::new();
         let mut rows = sqlx::query(
-                "SELECT id, name, status, handle, command, stderr, stdout \
-                FROM tasks WHERE job = ?"
-                ).bind(&job_id)
-                .fetch(conn);
+            "SELECT id, name, status, handle, command, stderr, stdout \
+                FROM tasks WHERE job = ?",
+        )
+        .bind(&job_id)
+        .fetch(conn);
 
         while let Some(row) = rows
             .try_next()
@@ -430,7 +431,22 @@ impl Task {
 
     /// Return an handle to the process task represented by self.
     pub fn handle(&self) -> TaskHandle {
-        TaskHandle { directory: PathBuf::from(&self.handle) }
+        TaskHandle {
+            directory: PathBuf::from(&self.handle),
+        }
+    }
+
+    pub async fn count_by_status(
+        status: &Status,
+        conn: &mut SqliteConnection,
+    ) -> Result<usize, ModelError> {
+        let (count,): (i32,) = sqlx::query_as("SELECT COUNT(*) FROM tasks WHERE status = ?")
+            .bind(status.as_u8())
+            .fetch_one(conn)
+            .await
+            .map_err(|e| ModelError::DbError(e.to_string()))?;
+        // sqlite only support isize
+        Ok(count as usize)
     }
 }
 
@@ -623,7 +639,7 @@ impl Batch {
         })
     }
 
-    pub async fn next_ready_task<'a, 'b>(&'a self) -> Result<Option<&'b Task>, ModelError>
+    pub async fn next_ready_task<'a, 'b>(&'a mut self) -> Result<Option<&'b mut Task>, ModelError>
     where
         'a: 'b,
     {
@@ -644,8 +660,9 @@ impl Batch {
                 }
             }
         }
+        let mut ready_idx: Option<usize> = None;
         // find task with fulfilled dependencies
-        'ready_task_lookup: for task in self.tasks.iter() {
+        'ready_task_lookup: for (idx, task) in self.tasks.iter().enumerate() {
             // ignore running, of finished tasks
             if !task.status.is_pending() {
                 continue 'ready_task_lookup;
@@ -654,17 +671,21 @@ impl Batch {
             // iter dependencies
             if let Some(parent_ids) = dependencies_index.get(&task_id) {
                 for parent_id in parent_ids {
-                    let idx = task_index.get(parent_id).ok_or(ModelError::InvalidTaskId)?;
-                    let parent = &self.tasks[*idx];
+                    let parent_idx = task_index.get(parent_id).ok_or(ModelError::InvalidTaskId)?;
+                    let parent = &self.tasks[*parent_idx];
                     /* TODO handle failed states */
                     if !parent.status.is_finished() {
                         continue 'ready_task_lookup;
                     }
                 }
             }
-            return Ok(Some(task));
+            ready_idx = Some(idx);
+            break;
         }
-        Ok(None)
+        match ready_idx {
+            Some(idx) => Ok(self.tasks.get_mut(idx)),
+            None => Ok(None),
+        }
     }
 }
 
