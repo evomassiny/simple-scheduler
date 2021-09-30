@@ -8,6 +8,8 @@ extern crate serde_json;
 extern crate sqlx;
 extern crate tempfile;
 extern crate zip;
+extern crate rsa;
+extern crate aes;
 
 mod auth;
 mod messaging;

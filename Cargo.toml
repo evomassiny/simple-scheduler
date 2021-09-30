@@ -21,3 +21,5 @@ quick-xml = { version = "*", features = [ "serialize" ] }  # XML reader, with se
 async-trait = "*"
 tempfile = "*"
 zip = "*" # sync only so far
+rsa = { version = "*", features = [ "alloc" ] } # RSA asymetric encryption
+aes = "*" # AES symetric encryption
