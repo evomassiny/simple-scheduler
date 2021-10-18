@@ -1,5 +1,5 @@
-#[macro_use]
-extern crate rocket;
+#[macro_use] extern crate rocket;
+#[macro_use] extern crate jaded;
 extern crate chrono;
 extern crate dotenv;
 extern crate nix;
@@ -10,6 +10,7 @@ extern crate tempfile;
 extern crate zip;
 extern crate rsa;
 extern crate aes;
+extern crate base64;
 
 mod auth;
 mod messaging;

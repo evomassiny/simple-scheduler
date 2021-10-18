@@ -23,3 +23,5 @@ tempfile = "*"
 zip = "*" # sync only so far
 rsa = { version = "*", features = [ "alloc" ] } # RSA asymetric encryption
 aes = "*" # AES symetric encryption
+jaded = { version = "*", features = [ "derive" ] } # Java Object deserialization
+base64 = "*"
