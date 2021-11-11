@@ -52,9 +52,16 @@ async fn main() {
     let scheduler_client = scheduler_server.client();
     scheduler_server.start();
 
+    // Load RSA key pair (for auth)
+    let key_pair = auth::KeyPair::load_from(
+        std::env::var("PUBLIC_KEY_PATH").expect("No 'PUBLIC_KEY_PATH' set."),
+        std::env::var("PRIVATE_KEY_PATH").expect("No 'PRIVATE_KEY_PATH' set."),
+    ).await.expect("Could not read key pair");
+
     // launch HTTP server
     let result = rocket::build()
         .manage(scheduler_client)
+        .manage(key_pair)
         .mount(
             "/rest/scheduler/",
             routes![

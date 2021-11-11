@@ -1,9 +1,11 @@
-use rsa::{PaddingScheme, RsaPrivateKey, pkcs8::FromPrivateKey};
+use aes::{
+    cipher::generic_array::GenericArray, Aes128, Block, BlockDecrypt, NewBlockCipher, BLOCK_SIZE,
+};
+use base64;
+use jaded::{FromJava, Parser};
+use rsa::{pkcs8::FromPrivateKey, PaddingScheme, RsaPrivateKey};
 use std::io::{Error as IOError, ErrorKind};
 use std::str::FromStr;
-use aes::{BLOCK_SIZE, Aes128, Block, NewBlockCipher, BlockDecrypt, cipher::generic_array::GenericArray};
-use base64;
-use jaded::{Parser, FromJava};
 
 #[derive(Debug, FromJava)]
 pub struct Credentials {
@@ -13,17 +15,32 @@ pub struct Credentials {
 
 impl Credentials {
 
-    pub fn from_encrypted_str(encrypted_data: &str, private_key: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+    /// Build a Credential from a base64 
+    /// encoded, AES encrypted str.
+    /// The AES key must be stored in the data,
+    /// and being decrytable using the PKCS8 RSA private key (in DER format).
+    pub fn from_encrypted_str(
+        encrypted_data: &str,
+        private_key: &[u8],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let blob = base64::decode(encrypted_data)?;
-        let clear_data = EncryptedData::parse(&blob)?
-            .decrypt_data(&private_key)?;
+        let clear_data = EncryptedData::parse(&blob)?.decrypt_data(&private_key)?;
 
         if let Ok(mut parser) = Parser::new(clear_data.as_slice()) {
             let cred: Self = parser.read_as()?;
             return Ok(cred);
         }
 
-        Err(Box::new(IOError::new(ErrorKind::InvalidData, "Could not parse auth data")))
+        Err(Box::new(IOError::new(
+            ErrorKind::InvalidData,
+            "Could not parse auth data",
+        )))
+    }
+    
+    /// test user/pass credentials
+    pub fn is_allowed(&self) -> bool {
+        // TODO!
+        true
     }
 }
 
@@ -72,6 +89,8 @@ pub struct EncryptedData<'a> {
 }
 impl<'a> EncryptedData<'a> {
 
+    /// Parse a bytes slice into an EncryptedData,
+    /// but does not decrypt it.
     pub fn parse(bytes: &'a [u8]) -> Result<Self, Box<dyn std::error::Error>> {
         let mut start: usize = 0;
         let mut idx: usize = 0;
@@ -88,7 +107,7 @@ impl<'a> EncryptedData<'a> {
         idx = start + index_of(&bytes[start..], '\n' as u8)?;
         let cipher: CipherKind = std::str::from_utf8(&bytes[start..idx])?.parse::<CipherKind>()?;
         // parse AES key, it's must be `size` bits
-        start = idx + 1; // skip '\n' 
+        start = idx + 1; // skip '\n'
         idx = start + aes_encrypted_key_size / 8usize;
         if idx > bytes.len() {
             return Err(Box::new(IOError::new(
@@ -106,7 +125,8 @@ impl<'a> EncryptedData<'a> {
         })
     }
 
-    pub fn decrypt_aes_key(
+    /// Decrypts the aes key using an RSA PKCS8 DER private key.
+    fn decrypt_aes_key(
         &self,
         private_key: &[u8],
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -123,6 +143,7 @@ impl<'a> EncryptedData<'a> {
         }
     }
 
+    /// Decrypts the EncryptedData content using an RSA PKCS8 DER key.
     pub fn decrypt_data(&self, private_key: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let aes_key_bytes: Vec<u8> = self.decrypt_aes_key(private_key)?;
         let aes_key = GenericArray::from_slice(&aes_key_bytes[..16]);
@@ -143,11 +164,12 @@ impl<'a> EncryptedData<'a> {
 
 #[test]
 fn test_credential() {
-    const PRIVATE_KEY: &[u8] = include_bytes!("../../test-data/authentification/private.pkcs8.der");
-    const AUTH_DATA: &str = include_str!("../../test-data/authentification/credential-java-debug.enc");
+    const PRIVATE_KEY: &[u8] = include_bytes!("../../test-data/authentification/private.rsa.pkcs8.der");
+    const AUTH_DATA: &str =
+        include_str!("../../test-data/authentification/credential-java-debug.enc");
 
-    let credential: Credentials = Credentials::from_encrypted_str(AUTH_DATA, PRIVATE_KEY).expect("Could not parse token");
+    let credential: Credentials =
+        Credentials::from_encrypted_str(AUTH_DATA, PRIVATE_KEY).expect("Could not parse token");
     assert_eq!(&credential.login, "debug-user");
     assert_eq!(&credential.pass, "debug-password");
 }
-

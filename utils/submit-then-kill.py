@@ -7,15 +7,16 @@ from zipfile import ZIP_DEFLATED, ZipFile
 repo_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # dummy
-cred_path = os.path.join(repo_directory, "utils", os.path.basename(__file__))
+cred_path = os.path.join(repo_directory, "test-data", "authentification", "credential-java-debug.enc")
 
 print("mockup login")
 session = Session()
 with open(cred_path, "rb") as cred_fd:
-    session.post(
+    r = session.post(
         "http://127.0.0.1:8000/rest/scheduler/login",
         files={"credential": ("creds.enc", cred_fd, "text/plain")},
     )
+    print(r.content)
 
 # submit job
 workflow_path = os.path.join(repo_directory, "utils", "echo-workflow.xml")
