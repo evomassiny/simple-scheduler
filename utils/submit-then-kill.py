@@ -6,10 +6,15 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 repo_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# dummy
-cred_path = os.path.join(repo_directory, "test-data", "authentification", "credential-java-debug.enc")
+cred_path = os.path.join(
+    repo_directory,
+    "backend",
+    "test-data",
+    "authentification",
+    "credential-java-debug.enc",
+)
 
-print("mockup login")
+print("login with debug credential")
 session = Session()
 with open(cred_path, "rb") as cred_fd:
     r = session.post(
@@ -22,10 +27,10 @@ with open(cred_path, "rb") as cred_fd:
 workflow_path = os.path.join(repo_directory, "utils", "echo-workflow.xml")
 zip_file = workflow_path.replace(".xml", ".zip")
 
-print("submit", workflow_path)
+print("submit job", workflow_path)
 with open(workflow_path, "rb") as workflow_fd:
 
-    with ZipFile(zip_file, 'w', compression=ZIP_DEFLATED) as zf:
+    with ZipFile(zip_file, "w", compression=ZIP_DEFLATED) as zf:
         zf.writestr("job.xml", workflow_fd.read())
 
 with open(zip_file, "rb") as zip_fd:
@@ -38,7 +43,7 @@ with open(zip_file, "rb") as zip_fd:
     pprint(data)
     print()
 
-job_id = data['id']
+job_id = data["id"]
 print("get status")
 for _ in range(4):
     response = session.get(
@@ -48,7 +53,6 @@ for _ in range(4):
     pprint(data)
     sleep(0.5)
     print()
-
 
 
 print("Killing job")
