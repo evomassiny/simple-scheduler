@@ -1,5 +1,11 @@
 use aes::{
-    cipher::generic_array::GenericArray, Aes128, Block, BlockDecrypt, NewBlockCipher, BLOCK_SIZE,
+    cipher::{
+        generic_array::GenericArray,
+        KeyInit,
+        BlockDecrypt, 
+        //NewBlockCipher, BLOCK_SIZE,
+    },
+    Aes128, Block, 
 };
 use base64;
 use jaded::{FromJava, Parser};
@@ -12,6 +18,8 @@ pub struct Credentials {
     pub login: String,
     pub pass: String,
 }
+
+pub const BLOCK_SIZE: usize = 16;
 
 impl Credentials {
 

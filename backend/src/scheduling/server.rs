@@ -64,8 +64,9 @@ impl SchedulerServer {
                 if let Some(task) = batch.next_ready_task().await? {
                     // submit task
                     let task_id = task.id.ok_or(SchedulerServerError::NoSuchTask)?;
+                    let commands: Vec<String> = task.command_args.iter().map(|arg| arg.argument.clone()).collect();
                     let handle =
-                        TaskHandle::spawn(&task.command, task_id, Some(self.socket.clone()))
+                        TaskHandle::spawn(commands, task_id, Some(self.socket.clone()))
                             .await?;
                     // update task
                     task.handle = handle.handle_string();

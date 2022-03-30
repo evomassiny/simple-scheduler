@@ -14,17 +14,26 @@ CREATE TABLE IF NOT EXISTS jobs (
       -- * 6 -> Canceled,
 );
 
+-- Single task (eg shell command)
 CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
       name VARCHAR(256) NOT NULL DEFAULT "",
       handle VARCHAR(512) NOT NULL DEFAULT "",
       status TINYINT NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5, 6)),
-      command TEXT NOT NULL,
       stderr TEXT DEFAULT NULL,
       stdout TEXT DEFAULT NULL,
       job INTEGER,
       FOREIGN KEY(job) REFERENCES jobs(id) -- jobs pk constraint
 );
+
+CREATE TABLE IF NOT EXISTS task_command_arguments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+      argument TEXT NOT NULL,
+      position INTEGER,
+      task INTEGER,
+      FOREIGN KEY(task) REFERENCES tasks(id) -- tasks pk constraint
+);
+
 CREATE TABLE IF NOT EXISTS task_dependencies (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
       child INTEGER,

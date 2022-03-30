@@ -18,14 +18,15 @@ pub struct WorkFlowTask {
 }
 
 impl WorkFlowTask {
-    /// Format executable and executable argument into one
-    /// shell command.
-    pub fn command(&self) -> String {
-        let mut cmd = self.executable.clone();
+
+    /// Format executable and executable argument into a list
+    /// of shell command arguments.
+    pub fn commands(&self) -> Vec<String> {
+        let mut cmds = vec![self.executable.clone()];
         for arg in &self.executable_arguments {
-            cmd += &format!(r#" "{}""#, &arg);
+            cmds.push(arg.clone())
         }
-        cmd
+        cmds
     }
 }
 

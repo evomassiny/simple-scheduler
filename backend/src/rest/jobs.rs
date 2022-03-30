@@ -10,7 +10,6 @@ use rocket::{
     serde::json::{json, Value as JsonValue},
     State,
 };
-use sqlx::sqlite::SqliteConnection;
 use std::collections::HashMap;
 
 #[derive(FromForm)]
@@ -146,10 +145,10 @@ pub async fn kill_job(
 #[get("/spawn")]
 pub async fn debug_spawn(scheduler: &State<SchedulerClient>) -> String {
     // build task DB object and get its id
-    let cmd: String = "sleep 30 && echo $(date)".to_string();
+    let commands: Vec<String> = vec!["sleep 30 && echo $(date)".to_string()];
     let scheduler = scheduler.inner();
     scheduler
-        .submit_command_job("command_job", "task", &cmd)
+        .submit_command_job("command_job", "task", commands)
         .await
         .expect("failed");
     String::from("task successfully launched")

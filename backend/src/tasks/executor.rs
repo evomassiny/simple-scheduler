@@ -35,7 +35,7 @@ impl TaskHandle {
      *  **as a daemon process**, so it can outlive the caller process.
      */
     fn spawn_blocking(
-        cmd: &str,
+        commands: Vec<CString>,
         id: i64,
         hypervisor_sock: Option<PathBuf>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -93,11 +93,11 @@ impl TaskHandle {
 
                             // Build the command line
                             // * build command args
-                            let args: Vec<CString> = vec![
+                            let mut args: Vec<CString> = vec![
                                 CString::new("/bin/bash").expect("failed to parse cmd"),
-                                CString::new("-c").expect("failed to parse cmd"),
-                                CString::new(cmd).expect("failed to parse cmd"),
+                                CString::new("-c").expect("failed to parse cmd")
                             ];
+                            args.extend(commands);
 
                             // finally fork the process:
                             // * the child will execute the command
@@ -176,15 +176,19 @@ impl TaskHandle {
      *  see https://www.freedesktop.org/software/systemd/man/daemon.html
      */
     pub async fn spawn(
-        cmd: &str,
+        cmd_args: Vec<String>,
         id: i64,
         hypervisor_sock: Option<PathBuf>,
     ) -> Result<Self, String> {
-        let command: String = String::from(cmd);
+        let mut commands: Vec<CString> = vec![];
+        for arg in cmd_args {
+            commands.push(CString::new(arg).map_err(|_| "Could not format argument into CString".to_string())?);
+        }
+
         // wrap the blocking function into its own thread, to avoid messing
         // with the current executor
         spawn_blocking(move || {
-            Self::spawn_blocking(&command, id, hypervisor_sock)
+            Self::spawn_blocking(commands, id, hypervisor_sock)
                 .map_err(|e| format!("Could not spawn daemon task: '{}'", e))
         })
         .await

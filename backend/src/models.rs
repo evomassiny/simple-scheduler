@@ -276,12 +276,108 @@ impl Job {
 }
 
 #[derive(Debug, Clone)]
+pub struct TaskCommandArgs {
+    pub id: Option<i64>,
+    pub argument: String,
+    pub position: i64,
+    pub task: Option<i64>,
+}
+
+#[async_trait]
+impl Model for TaskCommandArgs {
+    async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
+        let _query_result = sqlx::query(
+            "UPDATE task_command_arguments \
+            SET argument = ?, position = ?, tasks = ?, \
+            WHERE id = ?",
+        )
+        .bind(&self.argument)
+        .bind(&self.position)
+        .bind(&self.task.ok_or(ModelError::ModelNotFound)?)
+        .bind(self.id.ok_or(ModelError::ModelNotFound)?)
+        .execute(conn)
+        .await
+        .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
+        Ok(())
+    }
+
+    async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
+        let query_result = sqlx::query(
+            "INSERT INTO task_command_arguments (argument, position, task) \
+            VALUES (?, ?, ?)",
+        )
+        .bind(&self.argument)
+        .bind(self.position)
+        .bind(&self.task)
+        .execute(conn)
+        .await
+        .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
+        let id = query_result.last_insert_rowid();
+        self.id = Some(id);
+        Ok(())
+    }
+
+    fn id(&self) -> Option<i64> {
+        self.id
+    }
+}
+
+impl TaskCommandArgs {
+    async fn select_by_task(
+        task_id: i64,
+        conn: &mut SqliteConnection,
+    ) -> Result<Vec<Self>, ModelError> {
+        // collect command args
+        let mut rows = sqlx::query(
+            "SELECT id, argument, position FROM task_command_arguments WHERE task = ? ORDER BY position",
+        )
+        .bind(task_id)
+        .fetch(&mut *conn);
+
+        let mut command_args: Vec<TaskCommandArgs> = Vec::new();
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| ModelError::DbError(e.to_string()))?
+        {
+            command_args.push(
+                 Self {
+                task: Some(task_id),
+                position: row
+                    .try_get("position")
+                    .map_err(|_| ModelError::ColumnError("position".to_string()))?,
+                argument: row
+                    .try_get("argument")
+                    .map_err(|_| ModelError::ColumnError("argument".to_string()))?,
+                id: row
+                    .try_get("argument")
+                    .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+            });
+        }
+        Ok(command_args)
+    }
+
+    pub fn from_strings(command_args: Vec<String>) -> Vec<Self> {
+        let mut args: Vec<Self> = Vec::new();
+        for (i, arg) in command_args.into_iter().enumerate() {
+            args.push( Self {
+                task: None,
+                position: i as i64,
+                argument: arg,
+                id: None,
+            });
+        }
+        args
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Task {
     pub id: Option<i64>,
     pub name: String,
     pub status: Status,
     pub handle: String,
-    pub command: String,
+    pub command_args: Vec<TaskCommandArgs>,
     pub stderr: Option<String>,
     pub stdout: Option<String>,
     pub job: i64,
@@ -293,38 +389,47 @@ impl Model for Task {
         let _query_result = sqlx::query(
             "UPDATE tasks \
             SET name = ?, status = ?, handle = ?, \
-            command = ?, job = ?, stderr = ?, stdout = ? \
+            job = ?, stderr = ?, stdout = ? \
             WHERE id = ?",
         )
         .bind(&self.name)
         .bind(self.status.as_u8())
         .bind(&self.handle)
-        .bind(&self.command)
         .bind(&self.job)
         .bind(&self.stderr)
         .bind(&self.stdout)
         .bind(self.id.ok_or(ModelError::ModelNotFound)?)
-        .execute(conn)
+        .execute(&mut *conn)
         .await
         .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
+
+        for command in self.command_args.iter_mut() {
+            command.update(&mut *conn).await?;
+        }
+
         Ok(())
     }
 
     async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let query_result = sqlx::query(
-            "INSERT INTO tasks (name, status, handle, command, job) \
-            VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (name, status, handle, job) \
+            VALUES (?, ?, ?, ?)",
         )
         .bind(&self.name)
         .bind(self.status.as_u8())
         .bind(&self.handle)
-        .bind(&self.command)
         .bind(&self.job)
-        .execute(conn)
+        .execute(&mut *conn)
         .await
         .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
+
         let id = query_result.last_insert_rowid();
         self.id = Some(id);
+
+        for command in self.command_args.iter_mut() {
+            command.task = Some(id);
+            command.create(&mut *conn).await?;
+        }
         Ok(())
     }
 
@@ -340,11 +445,11 @@ impl Task {
         conn: &mut SqliteConnection,
     ) -> Result<Self, ModelError> {
         let row = sqlx::query(
-            "SELECT id, name, status, handle, command, job, stderr, stdout \
+            "SELECT id, name, status, handle, job, stderr, stdout \
             FROM tasks WHERE handle = ?",
         )
         .bind(&handle)
-        .fetch_one(conn)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|_| ModelError::ModelNotFound)?;
 
@@ -353,10 +458,13 @@ impl Task {
             .map_err(|_| ModelError::ColumnError("status".to_string()))?;
         let status = Status::from_u8(status_code)
             .map_err(|_| ModelError::ColumnError("status".to_string()))?;
-        Ok(Self {
-            id: row
-                .try_get("id")
-                .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+
+        let task_id: i64 = row
+            .try_get("id")
+            .map_err(|_| ModelError::ColumnError("id".to_string()))?;
+
+        let task = Self {
+            id: Some(task_id),
             name: row
                 .try_get("name")
                 .map_err(|_| ModelError::ColumnError("name".to_string()))?,
@@ -364,9 +472,6 @@ impl Task {
             handle: row
                 .try_get("handle")
                 .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
-            command: row
-                .try_get("command")
-                .map_err(|_| ModelError::ColumnError("command".to_string()))?,
             job: row
                 .try_get("job")
                 .map_err(|_| ModelError::ColumnError("job".to_string()))?,
@@ -376,7 +481,9 @@ impl Task {
             stdout: row
                 .try_get("stdout")
                 .map_err(|_| ModelError::ColumnError("job".to_string()))?,
-        })
+            command_args: TaskCommandArgs::select_by_task(task_id, &mut *conn).await?,
+        };
+        Ok(task)
     }
 
     /// query database and return all tasks belonging to `job_id`
@@ -386,11 +493,11 @@ impl Task {
     ) -> Result<Vec<Self>, ModelError> {
         let mut tasks: Vec<Task> = Vec::new();
         let mut rows = sqlx::query(
-            "SELECT id, name, status, handle, command, stderr, stdout \
+            "SELECT id, name, status, handle, stderr, stdout \
                 FROM tasks WHERE job = ?",
         )
         .bind(&job_id)
-        .fetch(conn);
+        .fetch(&mut *conn);
 
         while let Some(row) = rows
             .try_next()
@@ -403,19 +510,18 @@ impl Task {
             let status = Status::from_u8(status_code)
                 .map_err(|_| ModelError::ColumnError("status code".to_string()))?;
 
+            let task_id: i64 = row
+                .try_get("id")
+                .map_err(|_| ModelError::ColumnError("id".to_string()))?;
+
             tasks.push(Self {
-                id: row
-                    .try_get("id")
-                    .map_err(|_| ModelError::ColumnError("id".to_string()))?,
+                id: Some(task_id),
                 name: row
                     .try_get("name")
                     .map_err(|_| ModelError::ColumnError("name".to_string()))?,
                 handle: row
                     .try_get("handle")
                     .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
-                command: row
-                    .try_get("command")
-                    .map_err(|_| ModelError::ColumnError("command".to_string()))?,
                 job: job_id,
                 status,
                 stderr: row
@@ -424,7 +530,19 @@ impl Task {
                 stdout: row
                     .try_get("stdout")
                     .map_err(|_| ModelError::ColumnError("command".to_string()))?,
+                command_args: Vec::new(),
             });
+        }
+        drop(rows);
+
+        for task in tasks.iter_mut() {
+            task.command_args.extend(
+                TaskCommandArgs::select_by_task(
+                    task.id.ok_or(ModelError::ModelNotFound)?,
+                    &mut *conn,
+                )
+                .await?
+            );
         }
         Ok(tasks)
     }
@@ -544,7 +662,7 @@ impl Batch {
     pub async fn from_shell_command(
         job_name: &str,
         task_name: &str,
-        cmd: &str,
+        cmd: Vec<String>,
         conn: &mut SqliteConnection,
     ) -> Result<Self, ModelError> {
         let mut job = Job::new(&job_name);
@@ -556,7 +674,7 @@ impl Batch {
             name: task_name.to_string(),
             status: Status::Pending,
             handle: "".to_string(),
-            command: cmd.to_string(),
+            command_args: TaskCommandArgs::from_strings(cmd),
             job: job_id,
             stdout: None,
             stderr: None,
@@ -595,7 +713,7 @@ impl Batch {
                 name: graph_task.name.clone(),
                 status: Status::Pending,
                 handle: "".to_string(),
-                command: graph_task.command(),
+                command_args: TaskCommandArgs::from_strings(graph_task.commands()),
                 job: job_id,
                 stdout: None,
                 stderr: None,

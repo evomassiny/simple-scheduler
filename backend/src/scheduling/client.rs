@@ -45,7 +45,7 @@ impl SchedulerClient {
         &self,
         job_name: &str,
         task_name: &str,
-        cmd: &str,
+        cmd: Vec<String>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = self.pool.acquire().await?;
         let batch = Batch::from_shell_command(job_name, task_name, cmd, &mut conn).await;
