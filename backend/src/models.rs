@@ -288,7 +288,7 @@ impl Model for TaskCommandArgs {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(
             "UPDATE task_command_arguments \
-            SET argument = ?, position = ?, tasks = ?, \
+            SET argument = ?, position = ?, task = ? \
             WHERE id = ?",
         )
         .bind(&self.argument)
@@ -350,7 +350,7 @@ impl TaskCommandArgs {
                     .try_get("argument")
                     .map_err(|_| ModelError::ColumnError("argument".to_string()))?,
                 id: row
-                    .try_get("argument")
+                    .try_get("id")
                     .map_err(|_| ModelError::ColumnError("id".to_string()))?,
             });
         }
