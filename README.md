@@ -17,6 +17,7 @@ The app also keeps track of the status of each job, and is able to retreive thei
 # Install
 ```
 cargo install sqlx-cli
+cd backend
 sqlx database create
 sqlx migrate run 
 
