@@ -110,20 +110,46 @@ impl SchedulerServer {
         let _ = task.update(&mut conn).await?;
 
         let mut job = Job::get_by_id(task.job, &mut conn).await?;
-        if task.status.is_failure() {
-            job.status = task.status;
-            let _ = job.update(&mut conn).await?;
-        } else {
-            for task in Task::select_by_job(task.job, &mut conn).await? {
-                if !task.status.is_finished() {
-                    // if there is remaining tasks
-                    // no need to update job staus
-                    return Ok(());
-                }
+
+        for task in Task::select_by_job(task.job, &mut conn).await? {
+            if !task.status.is_finished() {
+                // if there is remaining tasks
+                // no need to update job staus
+                return Ok(());
             }
-            job.status = task.status;
-            let _ = job.update(&mut conn).await?;
         }
+
+        let tasks = Task::select_by_job(task.job, &mut conn).await?;
+
+        // job status:
+        // * If all task failed => failure
+        // * If ONE task canceled => Canceled
+        // * If ONE task Stopped => Stopped
+        // * If ONE task Killed => killed
+        // * if mix failure/succed => succeed
+        let mut job_status = Status::Failed;
+        for task in &tasks {
+            match task.status {
+                Status::Stopped => {
+                    job_status = Status::Stopped;
+                    break;
+                },
+                Status::Canceled => {
+                    job_status = Status::Canceled;
+                    break;
+                },
+                Status::Killed => {
+                    job_status = Status::Killed;
+                    break;
+                },
+                Status::Succeed => {
+                    job_status = Status::Succeed;
+                },
+                _ => {}
+            }
+        }
+        job.status = job_status;
+        let _ = job.update(&mut conn).await?;
         Ok(())
     }
 
@@ -215,7 +241,7 @@ impl SchedulerServer {
             // remove the socket file
             let _ = std::fs::remove_file(&self.socket);
             let listener =
-                UnixListener::bind(&self.socket).expect("Can bind to hypervisor socket.");
+                UnixListener::bind(&self.socket).expect("Cant bind to hypervisor socket.");
 
             loop {
                 match listener.accept().await {
