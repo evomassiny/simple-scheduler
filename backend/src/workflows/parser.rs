@@ -140,7 +140,10 @@ impl std::str::FromStr for WorkFlowGraph {
                 }
             }
             // collect executable
-            let executable = task.executable.command.value.clone();
+            let executable: String = match task.executable.command.value.as_str() {
+                "bash" => "/bin/bash".to_string(),
+                exe => exe.to_string(),
+            };
             let arguments = task
                 .executable
                 .command

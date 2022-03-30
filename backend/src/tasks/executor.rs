@@ -91,14 +91,6 @@ impl TaskHandle {
                             // (might not be needed)
                             block_sigchild().expect("Could not block SIGCHLD");
 
-                            // Build the command line
-                            // * build command args
-                            let mut args: Vec<CString> = vec![
-                                CString::new("/bin/bash").expect("failed to parse cmd"),
-                                CString::new("-c").expect("failed to parse cmd")
-                            ];
-                            args.extend(commands);
-
                             // finally fork the process:
                             // * the child will execute the command
                             // * the parent will wait for its child to terminate,
@@ -112,7 +104,7 @@ impl TaskHandle {
                                     handle.save_pid(getpid()).expect("failed to write PID file");
                                     // wait for a Start command
                                     task_barrier.wait().expect("Waiting for 'GO/NO GO' failed.");
-                                    let _ = execv(&args[0], &args);
+                                    let _ = execv(&commands[0], &commands);
                                     unreachable!();
                                 }
                                 // This process monitor the worker process
@@ -181,6 +173,7 @@ impl TaskHandle {
         hypervisor_sock: Option<PathBuf>,
     ) -> Result<Self, String> {
         let mut commands: Vec<CString> = vec![];
+
         for arg in cmd_args {
             commands.push(CString::new(arg).map_err(|_| "Could not format argument into CString".to_string())?);
         }

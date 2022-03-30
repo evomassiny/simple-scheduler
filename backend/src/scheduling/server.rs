@@ -168,9 +168,7 @@ impl SchedulerServer {
             match task.status {
                 Status::Running => {
                     let handle = task.handle();
-                    eprintln!(">>>>>>>>>>>>>>>>>>>>>>>>>");
                     handle.kill().await?;
-                    eprintln!("<<<<<<<<<<<<<<<<<<<<<<<<<");
                     // do not update task status,
                     // this will be done after the monitor process sends
                     // its status update.
