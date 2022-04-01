@@ -1,11 +1,9 @@
 use crate::scheduling::SchedulerClient;
 use crate::auth::{KeyPair, Credentials};
-use crate::sqlx::Row;
 use tempfile::NamedTempFile;
 use rocket::{form::Form, fs::TempFile, State};
 use rocket::tokio::{self, fs::File, io::AsyncReadExt};
 use sqlx::sqlite::SqliteConnection;
-use std::io::{Error as IOError, ErrorKind};
 
 #[derive(FromForm)]
 pub struct CredentialFileForm<'r> {
@@ -41,3 +39,7 @@ pub async fn login(key_pair: &State<KeyPair>, mut credential: Form<CredentialFil
     }
     "failed to connect"
 }
+
+//pub async fn create_user(db_conn: &mut SqliteConnection, login: String, password: String, key_pair: &KeyPair) -> Result<(), ()> {
+    
+//}

@@ -11,6 +11,7 @@ extern crate zip;
 extern crate rsa;
 extern crate aes;
 extern crate base64;
+extern crate password_hash;
 
 mod auth;
 mod messaging;
@@ -32,7 +33,6 @@ use scheduling::SchedulerServer;
 async fn index() -> &'static str {
     "Hello, world! there is no front-end. sry"
 }
-
 #[rocket::main]
 async fn main() {
     dotenv().expect("Failed reading .env");
