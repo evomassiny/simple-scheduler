@@ -10,15 +10,45 @@ use crate::rocket::futures::TryStreamExt;
 use async_trait::async_trait;
 use std::path::PathBuf;
 
+/// This `Task` struct implements abstraction over the `tasks` SQL table,
+/// defined as such:
+/// ```sql
+/// CREATE TABLE IF NOT EXISTS tasks (
+///       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+///       name VARCHAR(256) NOT NULL DEFAULT "",
+///       handle VARCHAR(512) NOT NULL DEFAULT "",
+///       status TINYINT NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5, 6)),
+///       stderr TEXT DEFAULT NULL,
+///       stdout TEXT DEFAULT NULL,
+///       job INTEGER,
+///       FOREIGN KEY(job) REFERENCES jobs(id) -- jobs pk constraint
+/// );
+/// ```
+/// This each record represent a native executable command to execute,
+/// the actual commands arguments are stored in a separated table `task_command_arguments`.
+///
+/// Each `Task` is linked to one `crate::models::Job` (many to one relationship) through their `job` attribute.
+///
+/// `Task` have dependencies, ie: some stask can only be launched after the success of another one,
+/// those dependencies are stored in a separated table `task_dependencies`.
+///
+/// The `Task` struct implements `crate::models::Model`.
 #[derive(Debug, Clone)]
 pub struct Task {
     pub id: Option<i64>,
     pub name: String,
+    /// Compeletion status
     pub status: Status,
+    /// path to a unix socket (fifo), which can be used to communicate with
+    /// the process monitoring this task.
     pub handle: String,
+    /// the actual command to excevp()
     pub command_args: Vec<TaskCommandArgs>,
+    /// what the task spat out in stdout while runnning
     pub stderr: Option<String>,
+    /// what the task spat out in stderr while runnning
     pub stdout: Option<String>,
+    /// id of  the related `Job` model
     pub job: i64,
 }
 
@@ -207,11 +237,32 @@ impl Task {
     }
 }
 
+/// This struct is an abstraction over the `task_dependencies` SQL table,
+/// defined as follow:
+/// ```sql
+/// CREATE TABLE IF NOT EXISTS task_dependencies (
+///       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+///       child INTEGER,
+///       parent INTEGER,
+///       job INTEGER,
+///       FOREIGN KEY(child) REFERENCES tasks(id), -- tasks pk constraint
+///       FOREIGN KEY(parent) REFERENCES tasks(id) -- tasks pk constraint
+///       FOREIGN KEY(job) REFERENCES jobs(id) -- tasks pk constraint
+/// );
+/// ```
+///
+/// It represents the dependency between two tasks, basically an edge in the 
+/// whole execution dependencies graph.
+///
+/// It implements the `crate::models::Model` trait.
 #[derive(Debug, Clone)]
 pub struct TaskDependency {
     pub id: Option<i64>,
+    /// id of the job that each of the 2 concerned tasks are belonging to.
     pub job: i64,
+    /// the task id that must be run AFTER `self.parent`
     pub child: i64,
+    /// the task id that must be run BEFORE `self.child`
     pub parent: i64,
 }
 
@@ -282,11 +333,26 @@ impl TaskDependency {
     }
 }
 
+/// Struct representing a task command argument, this is an
+/// abstraction over the `task_command_arguments` SQl table, defined as follow:
+///
+/// ```sql
+/// CREATE TABLE IF NOT EXISTS task_command_arguments (
+///       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+///       argument TEXT NOT NULL,
+///       position INTEGER,
+///       task INTEGER,
+///       FOREIGN KEY(task) REFERENCES tasks(id) -- tasks pk constraint
+/// );
+/// ```
 #[derive(Debug, Clone)]
 pub struct TaskCommandArgs {
     pub id: Option<i64>,
+    /// the executable argument 
     pub argument: String,
+    /// the argument position
     pub position: i64,
+    /// the ID o the related task
     pub task: Option<i64>,
 }
 

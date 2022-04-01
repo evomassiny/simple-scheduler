@@ -9,11 +9,33 @@ use sqlx::sqlite::SqliteConnection;
 use crate::rocket::futures::TryStreamExt;
 use async_trait::async_trait;
 
+
+/// The `Job` struct implements abstraction over the `jobs` SQL table, 
+/// defined as such:
+///
+/// ```sql
+/// CREATE TABLE IF NOT EXISTS jobs (
+///       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+///       name VARCHAR(256) NOT NULL,
+///       submit_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+///       status TINYINT NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5, 6))
+/// );
+/// ```
+///
+/// The `Job` model holds common information about a set of tasks and their dependancies,
+/// the `job.id` primary key is used to group the `tasks` and `task_dependencies` sql table,
+/// and their related `crate::models::Task` and `crate::models::TaskDependancy` models.
+///
+/// It implements the `crate::model::Model` trait.
 #[derive(Debug, Clone)]
 pub struct Job {
+    /// Id of a job
     pub id: Option<i64>,
+    /// name of the job
     pub name: String,
+    /// When the user submitted it
     pub submit_time: NaiveDateTime,
+    /// completion status
     pub status: Status,
 }
 

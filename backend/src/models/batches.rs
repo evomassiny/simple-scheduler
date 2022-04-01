@@ -7,20 +7,16 @@ use crate::models::{
     TaskDependency,
     TaskCommandArgs,
 };
-use crate::sqlx::Row;
 use sqlx::sqlite::SqliteConnection;
-use crate::rocket::futures::TryStreamExt;
-use async_trait::async_trait;
 use crate::workflows::WorkFlowGraph;
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 
 /// A `Batch` is a graph of task to be executed.
 /// It is a composition of 3 kinds of models:
-/// * one `Job`: metadata about the whole Batch
-/// * a collections of `Task`s, (commands to be executed)
-/// * a collections of `TaskDependency`s, which define the ordering
+/// * one `crate::models::Job`: metadata about the whole Batch
+/// * a collections of `crate::model::Task`s, (commands to be executed)
+/// * a collections of `crate::model::TaskDependency`s, which define the ordering
 /// constraints of the whole batch execution.
 #[derive(Debug)]
 pub struct Batch {
