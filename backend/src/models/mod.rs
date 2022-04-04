@@ -3,7 +3,7 @@ mod status;
 mod jobs;
 mod tasks;
 mod batches;
-//mod users;
+mod users;
 
 pub use crate::models::common::{
     Model,
@@ -17,6 +17,7 @@ pub use crate::models::tasks::{
     TaskDependency,
 };
 pub use crate::models::batches::Batch;
+pub use crate::models::users::User;
 
 
 

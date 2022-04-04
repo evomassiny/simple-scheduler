@@ -43,3 +43,9 @@ CREATE TABLE IF NOT EXISTS task_dependencies (
       FOREIGN KEY(parent) REFERENCES tasks(id) -- tasks pk constraint
       FOREIGN KEY(job) REFERENCES jobs(id) -- tasks pk constraint
 );
+
+CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+      name VARCHAR(256) NOT NULL,
+      password_hash VARCHAR(256) NOT NULL -- PHC string
+);

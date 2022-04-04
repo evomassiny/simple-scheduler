@@ -1,15 +1,18 @@
-use crate::auth::{KeyPair, Credentials};
-use tempfile::NamedTempFile;
-use rocket::{form::Form, fs::TempFile, State};
+use crate::auth::AuthToken;
+use crate::auth::KeyPair;
+use crate::scheduling::SchedulerClient;
+use rocket::http::{Status,CookieJar};
 use rocket::tokio::{self, fs::File, io::AsyncReadExt};
-//use sqlx::sqlite::SqliteConnection;
+use rocket::{form::Form, fs::TempFile, State};
+use tempfile::NamedTempFile;
 
+/// A Token file, from the client,
+/// (contains an encrypted serialized java object which contains credential infos).
 #[derive(FromForm)]
 pub struct CredentialFileForm<'r> {
     credential: TempFile<'r>,
 }
-impl <'r> CredentialFileForm<'r> {
-
+impl<'r> CredentialFileForm<'r> {
     pub async fn read_content(&mut self) -> Result<String, Box<dyn std::error::Error>> {
         // persist the temporary file
         // * use a NamedtempFile to get a free path
@@ -28,17 +31,39 @@ impl <'r> CredentialFileForm<'r> {
     }
 }
 
+/// parse any provided credential file, if the 
+/// referenced user is valid, stored an authentification token, 
+/// (client side, in a cookie).
+///
+/// This token will then be used to discriminate authorized users.
 #[post("/login", data = "<credential>")]
-pub async fn login(key_pair: &State<KeyPair>, mut credential: Form<CredentialFileForm<'_>>) -> &'static str {
+pub async fn login(
+    key_pair: &State<KeyPair>,
+    scheduler: &State<SchedulerClient>,
+    cookies: &CookieJar<'_>,
+    mut credential: Form<CredentialFileForm<'_>>,
+) -> (Status, &'static str) {
+    let mut conn = match scheduler.inner().pool.acquire().await {
+        Ok(conn) => conn,
+        Err(_) => return (Status::BadRequest, "Failed to acquire db handle."),
+    };
 
-    if let Ok(content) = credential.read_content().await {
-        if let Ok(cred) = key_pair.decode_credentials(&content) {
-            return if cred.is_allowed() { "yes" } else { "no" };
+    let maybe_credential = match credential.read_content().await {
+        Ok(content) => key_pair.decode_credentials(&content).ok(),
+        Err(_) => return (Status::BadRequest, "Failed to parse credentials."),
+    };
+
+    if let Some(credential) = maybe_credential {
+        match credential.get_user(&mut conn).await {
+            Some(user) => { 
+                // safe to unwrap because get_user() asserts that user exists.
+                let token = AuthToken::new(user).unwrap();
+                let cookie = token.as_cookie().into_owned();
+                cookies.add_private(cookie);
+                return (Status::Accepted, "success");
+            },
+            None => return (Status::Forbidden, "wrong user"),
         }
     }
-    "failed to connect"
+    (Status::Forbidden, "wrong credentials")
 }
-
-//pub async fn create_user(db_conn: &mut SqliteConnection, login: String, password: String, key_pair: &KeyPair) -> Result<(), ()> {
-    
-//}

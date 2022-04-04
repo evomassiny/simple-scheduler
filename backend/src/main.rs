@@ -1,4 +1,5 @@
 #[macro_use] extern crate rocket;
+#[macro_use] extern crate clap;
 extern crate jaded;
 extern crate chrono;
 extern crate dotenv;
@@ -11,7 +12,7 @@ extern crate zip;
 extern crate rsa;
 extern crate aes;
 extern crate base64;
-extern crate password_hash;
+extern crate scrypt;
 
 mod auth;
 mod messaging;
@@ -25,25 +26,74 @@ use std::path::Path;
 
 use dotenv::dotenv;
 use rocket::tokio;
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqlitePoolOptions, SqlitePool};
+use clap::{Parser, Subcommand};
 
 use scheduling::SchedulerServer;
 
-#[get("/")]
-async fn index() -> &'static str {
-    "Hello, world! there is no front-end. sry"
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+#[clap(propagate_version = true)]
+struct Cli {
+    #[clap(subcommand)]
+    command: Commands,
 }
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Adds files to myapp
+    RunServer,
+    CreateUser { name: String, password: String  },
+}
+
+
 #[rocket::main]
 async fn main() {
     dotenv().expect("Failed reading .env");
-    // Build database connection pool
     let url = std::env::var("DATABASE_URL").expect("No DATABASE_URL environment variable set");
+
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::CreateUser { name, password } => {
+            create_user(name, password, url).await;
+        },
+        Commands::RunServer => {
+            let pool = database_pool(url)
+                .await
+                .expect("Failed to get database pool");
+            start_server(pool).await;
+        },
+    }
+
+}
+
+async fn create_user(name: String, password: String, url: String) {
+    use crate::models::{User,Model};
+    use sqlx::SqliteConnection;
+    use crate::sqlx::Connection;
+    let mut conn = SqliteConnection::connect(&url)
+        .await
+        .expect("Could not connect with db.");
+
+    let mut user = User::new(&name, &password).expect("failed to build user object");
+    user.save(&mut conn).await;
+}
+
+async fn database_pool(url: String) -> Result<SqlitePool, String> {
+    // Build database connection pool
     let pool = SqlitePoolOptions::new()
         .max_connections(16)
         .connect(&url)
         .await
-        .expect("Could not connect to database.");
+        .map_err(|e| format!("failed to get database pool: {:?}", e))?;
+    Ok(pool)
+}
 
+/// Start Scheduler hypervisor service
+/// and Web server.
+/// Both tied to `pool`.
+async fn start_server(pool: SqlitePool) {
     // launch process update listener loop
     let hypervisor_socket = std::env::var("HYPERVISOR_SOCKET_PATH")
         .expect("No HYPERVISOR_SOCKET_PATH environment variable set");
@@ -76,4 +126,11 @@ async fn main() {
         .launch()
         .await;
     assert!(result.is_ok());
+
 }
+
+#[get("/")]
+async fn index() -> &'static str {
+    "Hello, world! there is no front-end. sry"
+}
+

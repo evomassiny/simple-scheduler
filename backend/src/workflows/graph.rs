@@ -48,10 +48,31 @@ pub struct WorkFlowGraph {
     ///  * each elements in that list is the task index (in self.tasks) where this edge is going
     ///  to.
     pub(crate) dependency_indices: Vec<Vec<usize>>,
+    /// index of each task (referenced by names) in `self.tasks`
+    pub(crate) name_to_idx: HashMap<String, usize>,
 }
 
 impl WorkFlowGraph {
-
+    ///
+    /// returns references to the dependencies of `self`
+    pub fn get_task_dependencies<'a>(
+        &'a self,
+        task_name: &str,
+    ) -> Result<Vec<&'a WorkFlowTask>, WorkflowError> {
+        let task_idx: usize = *self
+            .name_to_idx
+            .get(task_name)
+            .ok_or(WorkflowError::TaskDoesNotExist)?;
+        let dependency_indices = self
+            .dependency_indices
+            .get(task_idx)
+            .ok_or(WorkflowError::TaskDoesNotExist)?;
+        let mut tasks: Vec<&WorkFlowTask> = Vec::new();
+        for dep_idx in dependency_indices {
+            tasks.push(&self.tasks[*dep_idx]);
+        }
+        Ok(tasks)
+    }
 
     /// Check for cycle in the dependency graph,
     /// of the `self.tasks[task_idx]` task.

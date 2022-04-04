@@ -12,6 +12,8 @@ use jaded::{FromJava, Parser};
 use rsa::{pkcs8::FromPrivateKey, PaddingScheme, RsaPrivateKey};
 use std::io::{Error as IOError, ErrorKind};
 use std::str::FromStr;
+use crate::models::User;
+use sqlx::SqliteConnection;
 
 #[derive(Debug, FromJava)]
 pub struct Credentials {
@@ -46,9 +48,14 @@ impl Credentials {
     }
     
     /// test user/pass credentials
-    pub fn is_allowed(&self) -> bool {
-        // TODO!
-        true
+    pub async fn get_user(&self, conn: &mut SqliteConnection) -> Option<User> {
+        if let Some(user) = User::get_from_name(&self.login, conn).await {
+            return match user.verify_password(&self.pass) {
+                Ok(true) => Some(user),
+                _ => None,
+            };
+        }
+        None
     }
 }
 
@@ -170,6 +177,7 @@ impl<'a> EncryptedData<'a> {
         Ok(decrypted)
     }
 }
+
 
 #[test]
 fn test_credential() {

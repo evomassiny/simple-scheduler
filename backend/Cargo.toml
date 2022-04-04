@@ -7,7 +7,7 @@ edition = "2018"
 
 [dependencies]
 # main server framework
-rocket = { git = "https://github.com/SergioBenitez/Rocket", branch = "master", features = [ "json" ] }
+rocket = { version = "0.5.0-rc.1",  features = ["secrets", "json" ] }
 # async sql queries
 sqlx = { version = "*", features = [ "runtime-tokio-rustls", "chrono", "sqlite", "migrate", "macros", "offline"] }
 
@@ -25,4 +25,6 @@ rsa = { version = "*", features = [ "alloc" ] } # RSA asymetric encryption
 aes = "*" # AES symetric encryption
 jaded = { version = "*", features = [ "derive" ] } # Java Object deserialization
 base64 = "*"
-password-hash = "*"
+scrypt = "0.10"
+jsonwebtoken = "8"
+clap = { version = "3", features =  ["derive"] }

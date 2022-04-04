@@ -25,6 +25,7 @@ with open(cred_path, "rb") as cred_fd:
 
 # submit job
 workflow_path = os.path.join(repo_directory, "utils", "echo-workflow.xml")
+workflow_path = os.path.join(repo_directory, "utils", "echo-workflow.xml")
 zip_file = workflow_path.replace(".xml", ".zip")
 
 print("submit job", workflow_path)
@@ -55,17 +56,17 @@ for _ in range(4):
     print()
 
 
-print("Killing job")
-response = session.put(
-    "http://127.0.0.1:8000/rest/scheduler/jobs/{job_id:d}/kill".format(job_id=job_id),
-)
-if response.status_code == 200:
-    data = response.json()
-    pprint(data)
-else:
-    print("Failed:")
-    print(response.text)
-print()
+# print("Killing job")
+# response = session.put(
+    # "http://127.0.0.1:8000/rest/scheduler/jobs/{job_id:d}/kill".format(job_id=job_id),
+# )
+# if response.status_code == 200:
+    # data = response.json()
+    # pprint(data)
+# else:
+    # print("Failed:")
+    # print(response.text)
+# print()
 
 print("get status")
 response = session.get(

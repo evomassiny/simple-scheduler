@@ -166,6 +166,7 @@ impl std::str::FromStr for WorkFlowGraph {
             name: job.name,
             tasks,
             dependency_indices,
+            name_to_idx,
         })
     }
 }

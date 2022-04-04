@@ -1,6 +1,6 @@
 use crate::models::{Job, Status};
 use crate::scheduling::SchedulerClient;
-use crate::sqlx::Row;
+use sqlx::Row;
 use rocket::{
     form::Form,
     fs::TempFile,
@@ -10,6 +10,7 @@ use rocket::{
     serde::json::{json, Value as JsonValue},
     State,
 };
+use crate::auth::AuthToken;
 use std::collections::HashMap;
 
 #[derive(FromForm)]
@@ -23,6 +24,7 @@ pub struct WorkflowForm<'r> {
 #[post("/submit", format = "multipart/form-data", data = "<uploaded_file>")]
 pub async fn submit_job(
     scheduler: &State<SchedulerClient>,
+    _auth: AuthToken,
     mut uploaded_file: Form<WorkflowForm<'_>>,
 ) -> Result<JsonValue, Custom<String>> {
     let scheduler = scheduler.inner();
@@ -42,6 +44,7 @@ pub async fn submit_job(
 #[get("/jobs/<job_id>")]
 pub async fn job_status(
     scheduler: &State<SchedulerClient>,
+    _auth: AuthToken,
     job_id: i64,
 ) -> Result<JsonValue, NotFound<String>> {
     let scheduler = scheduler.inner();
@@ -125,6 +128,7 @@ pub async fn job_status(
 #[put("/jobs/<job_id>/kill")]
 pub async fn kill_job(
     scheduler: &State<SchedulerClient>,
+    _auth: AuthToken,
     job_id: i64,
 ) -> Result<JsonValue, Custom<String>> {
     let scheduler = scheduler.inner();

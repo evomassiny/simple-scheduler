@@ -25,7 +25,6 @@ pub trait Model {
     async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError>;
     fn id(&self) -> Option<i64>;
 
-    //async fn save(&mut self) -> Result<(), ModelError>;
     async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let id = self.id();
         if id.is_some() {
