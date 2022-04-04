@@ -65,7 +65,7 @@ impl SchedulerClient {
     ) -> Result<i64, Box<dyn std::error::Error>> {
         let mut conn = self.pool.acquire().await?;
         // parse as workflow
-        let graph: WorkFlowGraph = WorkFlowGraph::from_str(&workflow_xml)?;
+        let graph: WorkFlowGraph = WorkFlowGraph::from_str(workflow_xml)?;
 
         // Save to DB
         let batch = Batch::from_graph(&graph, &mut conn).await?;
@@ -165,7 +165,7 @@ impl SchedulerClient {
             ToClientMsg::RequestResult(rr) => match rr {
                 RequestResult::Ok => Ok(()),
                 RequestResult::Err(error) => {
-                    Err(SchedulerClientError::KillFailed(error.to_string()))
+                    Err(SchedulerClientError::KillFailed(error))
                 }
             },
             _ => Err(SchedulerClientError::KillFailed(

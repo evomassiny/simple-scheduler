@@ -32,7 +32,7 @@ impl Credentials {
         private_key: &[u8],
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let blob = base64::decode(encrypted_data)?;
-        let clear_data = EncryptedData::parse(&blob)?.decrypt_data(&private_key)?;
+        let clear_data = EncryptedData::parse(&blob)?.decrypt_data(private_key)?;
 
         if let Ok(mut parser) = Parser::new(clear_data.as_slice()) {
             let cred: Self = parser.read_as()?;
@@ -67,6 +67,7 @@ fn index_of(bytes: &[u8], target: u8) -> Result<usize, IOError> {
 }
 
 /// Cipher used by proactive auth tokens
+#[allow(non_camel_case_types)]
 pub enum CipherKind {
     /// Only supported cipher kind
     RSA_ECB_PKCS1Padding,
@@ -103,16 +104,16 @@ impl<'a> EncryptedData<'a> {
         let mut start: usize = 0;
         let mut idx: usize = 0;
         // parse algo field
-        idx += index_of(&bytes[start..], '\n' as u8)?;
+        idx += index_of(&bytes[start..], b'\n')?;
         let _algo: &str = std::str::from_utf8(&bytes[start..idx])?;
         // parse size
         start = idx + 1; // skip '\n'
-        idx = start + index_of(&bytes[start..], '\n' as u8)?;
+        idx = start + index_of(&bytes[start..], b'\n')?;
         let size_str: &str = std::str::from_utf8(&bytes[start..idx])?;
         let aes_encrypted_key_size: usize = size_str.parse::<usize>()?;
         // parse cipher
         start = idx + 1; // skip '\n'
-        idx = start + index_of(&bytes[start..], '\n' as u8)?;
+        idx = start + index_of(&bytes[start..], b'\n')?;
         let cipher: CipherKind = std::str::from_utf8(&bytes[start..idx])?.parse::<CipherKind>()?;
         // parse AES key, it's must be `size` bits
         start = idx + 1; // skip '\n'
@@ -155,12 +156,12 @@ impl<'a> EncryptedData<'a> {
     pub fn decrypt_data(&self, private_key: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let aes_key_bytes: Vec<u8> = self.decrypt_aes_key(private_key)?;
         let aes_key = GenericArray::from_slice(&aes_key_bytes[..16]);
-        let cipher = Aes128::new(&aes_key);
+        let cipher = Aes128::new(aes_key);
         let mut block_start = 0;
         let mut block_end = BLOCK_SIZE;
         let mut decrypted: Vec<u8> = Vec::new();
         while block_end <= self.encrypted_data.len() {
-            let mut block = Block::from_slice(&self.encrypted_data[block_start..block_end]).clone();
+            let mut block = *Block::from_slice(&self.encrypted_data[block_start..block_end]);
             block_start += BLOCK_SIZE;
             block_end += BLOCK_SIZE;
             cipher.decrypt_block(&mut block);

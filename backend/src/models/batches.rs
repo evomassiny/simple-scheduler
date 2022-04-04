@@ -34,7 +34,7 @@ impl Batch {
         cmd: Vec<String>,
         conn: &mut SqliteConnection,
     ) -> Result<Self, ModelError> {
-        let mut job = Job::new(&job_name);
+        let mut job = Job::new(job_name);
         let _ = job.save(conn).await?;
         let job_id: i64 = job.id.ok_or(ModelError::ModelNotFound)?;
 

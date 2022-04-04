@@ -1,5 +1,5 @@
 #[macro_use] extern crate rocket;
-#[macro_use] extern crate jaded;
+extern crate jaded;
 extern crate chrono;
 extern crate dotenv;
 extern crate nix;

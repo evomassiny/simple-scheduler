@@ -1,9 +1,8 @@
-use crate::scheduling::SchedulerClient;
 use crate::auth::{KeyPair, Credentials};
 use tempfile::NamedTempFile;
 use rocket::{form::Form, fs::TempFile, State};
 use rocket::tokio::{self, fs::File, io::AsyncReadExt};
-use sqlx::sqlite::SqliteConnection;
+//use sqlx::sqlite::SqliteConnection;
 
 #[derive(FromForm)]
 pub struct CredentialFileForm<'r> {

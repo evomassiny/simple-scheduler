@@ -97,7 +97,7 @@ pub async fn job_status(
         // fetch status, build a string from it
         let status_code: u8 = row.try_get("status").map_err(|e| NotFound(e.to_string()))?;
         let status: String = Status::from_u8(status_code)
-            .map_err(|e| NotFound(e.to_string()))?
+            .map_err(NotFound)?
             .as_proactive_string();
         task_details.insert(
             name,

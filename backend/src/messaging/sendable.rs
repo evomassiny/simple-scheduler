@@ -16,7 +16,7 @@ pub trait ByteSerializabe {
 
 impl<SD: Serialize + DeserializeOwned + Sized> ByteSerializabe for SD {
     fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        bincode::deserialize(&bytes).map_err(|e| format!("cant parse query: {:?}", e))
+        bincode::deserialize(bytes).map_err(|e| format!("cant parse query: {:?}", e))
     }
 
     fn to_bytes(&self) -> Result<Vec<u8>, String> {

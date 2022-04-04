@@ -1,6 +1,6 @@
 use crate::auth::Credentials;
 use crate::rocket::tokio::{self, fs::File, io::AsyncReadExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// App-wide auth conf
 pub struct KeyPair {
