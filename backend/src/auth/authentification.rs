@@ -60,7 +60,7 @@ pub async fn login(
                 let token = AuthToken::new(user).unwrap();
                 let cookie = token.as_cookie().into_owned();
                 cookies.add_private(cookie);
-                return (Status::Accepted, "success");
+                return (Status::Ok, "success");
             },
             None => return (Status::Forbidden, "wrong user"),
         }

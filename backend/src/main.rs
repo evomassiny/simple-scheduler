@@ -122,7 +122,7 @@ async fn start_server(pool: SqlitePool) {
         .mount("/", routes![index])
         .launch()
         .await;
-    assert!(result.is_ok());
+    println!("{:?}", result);
 }
 
 #[get("/")]
