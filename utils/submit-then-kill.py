@@ -56,17 +56,17 @@ for _ in range(4):
     print()
 
 
-# print("Killing job")
-# response = session.put(
-    # "http://127.0.0.1:8000/rest/scheduler/jobs/{job_id:d}/kill".format(job_id=job_id),
-# )
-# if response.status_code == 200:
-    # data = response.json()
-    # pprint(data)
-# else:
-    # print("Failed:")
-    # print(response.text)
-# print()
+print("Killing job")
+response = session.put(
+    "http://127.0.0.1:8000/rest/scheduler/jobs/{job_id:d}/kill".format(job_id=job_id),
+)
+if response.status_code == 200:
+    data = response.json()
+    pprint(data)
+else:
+    print("Failed:")
+    print(response.text)
+print()
 
 print("get status")
 response = session.get(

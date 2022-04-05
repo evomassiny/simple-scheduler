@@ -6,6 +6,8 @@ use crate::models::{
     Task,
     TaskDependency,
     TaskCommandArgs,
+    User,
+    Existing,
 };
 use sqlx::sqlite::SqliteConnection;
 use crate::workflows::WorkFlowGraph;
@@ -28,37 +30,10 @@ pub struct Batch {
 }
 
 impl Batch {
-    pub async fn from_shell_command(
-        job_name: &str,
-        task_name: &str,
-        cmd: Vec<String>,
-        conn: &mut SqliteConnection,
-    ) -> Result<Self, ModelError> {
-        let mut job = Job::new(job_name);
-        let _ = job.save(conn).await?;
-        let job_id: i64 = job.id.ok_or(ModelError::ModelNotFound)?;
-
-        let mut task = Task {
-            id: None,
-            name: task_name.to_string(),
-            status: Status::Pending,
-            handle: "".to_string(),
-            command_args: TaskCommandArgs::from_strings(cmd),
-            job: job_id,
-            stdout: None,
-            stderr: None,
-        };
-        let _ = task.save(conn).await?;
-
-        Ok(Self {
-            job,
-            tasks: vec![task],
-            dependencies: vec![],
-        })
-    }
 
     pub async fn from_graph(
         workflow: &WorkFlowGraph,
+        user: &User<Existing>,
         conn: &mut SqliteConnection,
     ) -> Result<Self, ModelError> {
         // validate input
@@ -70,7 +45,7 @@ impl Batch {
         }
 
         // Create and save Job
-        let mut job = Job::new(&workflow.name);
+        let mut job = Job::new(&workflow.name, user);
         let _ = job.save(conn).await?;
         let job_id: i64 = job.id.ok_or(ModelError::ModelNotFound)?;
 

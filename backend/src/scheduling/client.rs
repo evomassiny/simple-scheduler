@@ -1,5 +1,5 @@
 use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
-use crate::models::{Batch, ModelError};
+use crate::models::{Batch, ModelError, User, Existing};
 use crate::tokio::net::UnixStream;
 use crate::workflows::WorkFlowGraph;
 use rocket::fs::TempFile as RocketTempFile;
@@ -40,35 +40,18 @@ impl SchedulerClient {
             .map_err(|_| SchedulerClientError::SchedulerConnectionError)
     }
 
-    /// Submit a Job with a single task: a shell command
-    pub async fn submit_command_job(
-        &self,
-        job_name: &str,
-        task_name: &str,
-        cmd: Vec<String>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut conn = self.pool.acquire().await?;
-        let batch = Batch::from_shell_command(job_name, task_name, cmd, &mut conn).await;
-        println!("batch: {:?}", &batch);
-
-        let mut to_hypervisor = self.connect_to_scheduler().await?;
-        let _ = ToSchedulerMsg::JobAppended
-            .async_send_to(&mut to_hypervisor)
-            .await?;
-        Ok(())
-    }
-
     /// parse a workflow file, and submit the parsed job
     pub async fn submit_workflow(
         &self,
         workflow_xml: &str,
+        user: &User<Existing>,
     ) -> Result<i64, Box<dyn std::error::Error>> {
         let mut conn = self.pool.acquire().await?;
         // parse as workflow
         let graph: WorkFlowGraph = WorkFlowGraph::from_str(workflow_xml)?;
 
         // Save to DB
-        let batch = Batch::from_graph(&graph, &mut conn).await?;
+        let batch = Batch::from_graph(&graph, &user, &mut conn).await?;
 
         // warn hypervisor that new jobs are available
         let mut to_hypervisor = self.connect_to_scheduler().await?;
@@ -85,6 +68,7 @@ impl SchedulerClient {
     pub async fn submit_from_tempfile(
         &self,
         uploaded_file: &mut RocketTempFile<'_>,
+        user: &User<Existing>,
     ) -> Result<i64, Box<dyn std::error::Error>> {
         // first persist the file
         // * use a NamedtempFile to get a free path
@@ -144,7 +128,7 @@ impl SchedulerClient {
             _ => return Err(Box::new(SchedulerClientError::BadInputFile)),
         };
 
-        let job_id = self.submit_workflow(&file_content).await?;
+        let job_id = self.submit_workflow(&file_content, &user).await?;
         Ok(job_id)
     }
 

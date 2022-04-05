@@ -8,6 +8,8 @@ mod users;
 pub use crate::models::common::{
     Model,
     ModelError,
+    New,
+    Existing,
 };
 pub use crate::models::status::Status;
 pub use crate::models::jobs::Job;
@@ -17,13 +19,13 @@ pub use crate::models::tasks::{
     TaskDependency,
 };
 pub use crate::models::batches::Batch;
-pub use crate::models::users::User;
+pub use crate::models::users::{create_or_update_user, User};
 
 
 
 #[cfg(test)]
 mod test {
-    use crate::models::Batch;
+    use crate::models::{Batch, create_or_update_user};
     use crate::workflows::{WorkFlowGraph, WorkFlowTask};
     use rocket::tokio;
     use sqlx::{Connection, Executor, SqliteConnection};
@@ -71,13 +73,14 @@ mod test {
     async fn test_graph_persistence() {
         // build DB
         let mut conn = setup_in_memory_database().await.unwrap();
+        let user = create_or_update_user("user-name", "covfefe", &mut conn).await.unwrap();
         // build graph
         let graph = build_test_workflow_graph();
         assert!(graph.is_cycle_free());
         assert!(graph.are_task_names_unique());
 
         // test batch creation
-        let batch = Batch::from_graph(&graph, &mut conn)
+        let batch = Batch::from_graph(&graph, &user, &mut conn)
             .await
             .expect("Failed to build Batch");
         assert_eq!(&batch.job.name, "test-job");

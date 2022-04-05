@@ -1,6 +1,6 @@
+use crate::auth::AuthToken;
 use crate::models::{Job, Status};
 use crate::scheduling::SchedulerClient;
-use sqlx::Row;
 use rocket::{
     form::Form,
     fs::TempFile,
@@ -10,7 +10,7 @@ use rocket::{
     serde::json::{json, Value as JsonValue},
     State,
 };
-use crate::auth::AuthToken;
+use sqlx::Row;
 use std::collections::HashMap;
 
 #[derive(FromForm)]
@@ -24,13 +24,22 @@ pub struct WorkflowForm<'r> {
 #[post("/submit", format = "multipart/form-data", data = "<uploaded_file>")]
 pub async fn submit_job(
     scheduler: &State<SchedulerClient>,
-    _auth: AuthToken,
+    auth: AuthToken,
     mut uploaded_file: Form<WorkflowForm<'_>>,
 ) -> Result<JsonValue, Custom<String>> {
     let scheduler = scheduler.inner();
+    let mut conn = scheduler
+        .pool
+        .acquire()
+        .await
+        .map_err(|e| Custom(HttpStatus::InternalServerError, e.to_string()))?;
+    let user = auth
+        .fetch_user(&mut conn)
+        .await
+        .ok_or(Custom(HttpStatus::InternalServerError, "unknown user".to_string()))?;
     // submit job
     let job_id = scheduler
-        .submit_from_tempfile(&mut uploaded_file.file)
+        .submit_from_tempfile(&mut uploaded_file.file, &user)
         .await
         .map_err(|e| Custom(HttpStatus::InternalServerError, e.to_string()))?;
 
@@ -133,7 +142,8 @@ pub async fn kill_job(
 ) -> Result<JsonValue, Custom<String>> {
     let scheduler = scheduler.inner();
 
-    scheduler.kill_job(job_id)
+    scheduler
+        .kill_job(job_id)
         .await
         .map_err(|e| Custom(HttpStatus::InternalServerError, e.to_string()))?;
 
@@ -144,16 +154,4 @@ pub async fn kill_job(
             "status": Status::Killed.as_proactive_string(),
         },
     }))
-}
-
-#[get("/spawn")]
-pub async fn debug_spawn(scheduler: &State<SchedulerClient>) -> String {
-    // build task DB object and get its id
-    let commands: Vec<String> = vec!["sleep 30 && echo $(date)".to_string()];
-    let scheduler = scheduler.inner();
-    scheduler
-        .submit_command_job("command_job", "task", commands)
-        .await
-        .expect("failed");
-    String::from("task successfully launched")
 }

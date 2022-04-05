@@ -21,7 +21,9 @@ cd backend
 sqlx database create
 sqlx migrate run 
 
-cargo build release
+cargo build --release
+target/release/simple-scheduler create-user debug-user debug-password
+target/release/simple-scheduler run-server
 ```
 
 # Internals

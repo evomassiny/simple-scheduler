@@ -2,7 +2,7 @@ use rocket::request::{self, Request, Outcome, FromRequest};
 use rocket::http::Status;
 use rocket::http::Cookie;
 use serde::{Deserialize, Serialize};
-use crate::models::{Model,User};
+use crate::models::{Model,User, New, Existing};
 use sqlx::SqliteConnection;
 use chrono::{DateTime, Utc, Duration};
 
@@ -19,7 +19,7 @@ pub struct AuthToken {
 
 impl AuthToken {
 
-    pub async fn fetch_user(&self, conn: &mut SqliteConnection) -> Option<User> {
+    pub async fn fetch_user(&self, conn: &mut SqliteConnection) -> Option<User<Existing>> {
         User::get_from_id(self.user_id, conn).await
     }
 
@@ -28,9 +28,9 @@ impl AuthToken {
         self.creation + Duration::days(AUTH_COOKIE_VALID_PERIOD_IN_DAYS) <=  now
     }
 
-    pub fn new(user: User) -> Option<Self> {
+    pub fn new(user: User<Existing>) -> Option<Self> {
         Some(Self {
-            user_id: user.id()?,
+            user_id: user.state.id,
             creation: Utc::now(),
         })
     }

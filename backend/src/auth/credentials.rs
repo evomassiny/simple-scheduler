@@ -3,7 +3,6 @@ use aes::{
         generic_array::GenericArray,
         KeyInit,
         BlockDecrypt, 
-        //NewBlockCipher, BLOCK_SIZE,
     },
     Aes128, Block, 
 };
@@ -12,7 +11,7 @@ use jaded::{FromJava, Parser};
 use rsa::{pkcs8::FromPrivateKey, PaddingScheme, RsaPrivateKey};
 use std::io::{Error as IOError, ErrorKind};
 use std::str::FromStr;
-use crate::models::User;
+use crate::models::{User, Existing};
 use sqlx::SqliteConnection;
 
 #[derive(Debug, FromJava)]
@@ -48,7 +47,7 @@ impl Credentials {
     }
     
     /// test user/pass credentials
-    pub async fn get_user(&self, conn: &mut SqliteConnection) -> Option<User> {
+    pub async fn get_user(&self, conn: &mut SqliteConnection) -> Option<User<Existing>> {
         if let Some(user) = User::get_from_name(&self.login, conn).await {
             return match user.verify_password(&self.pass) {
                 Ok(true) => Some(user),
