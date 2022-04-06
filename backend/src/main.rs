@@ -4,7 +4,6 @@ extern crate aes;
 extern crate base64;
 extern crate chrono;
 extern crate clap;
-extern crate dotenv;
 extern crate jaded;
 extern crate nix;
 extern crate rsa;
@@ -16,6 +15,7 @@ extern crate tempfile;
 extern crate zip;
 
 mod auth;
+mod config;
 mod messaging;
 mod models;
 mod rest;
@@ -23,15 +23,14 @@ mod scheduling;
 mod tasks;
 mod workflows;
 
+use crate::config::Config;
 use crate::models::create_or_update_user;
-use std::path::Path;
+use crate::scheduling::SchedulerServer;
 
 use clap::{Parser, Subcommand};
-use dotenv::dotenv;
-use rocket::tokio;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use rocket::{tokio, Build, Rocket};
 
-use scheduling::SchedulerServer;
+use std::path::Path;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -51,63 +50,46 @@ enum Commands {
 
 #[rocket::main]
 async fn main() {
-    dotenv().expect("Failed reading .env");
-    let db_url = std::env::var("DATABASE_URL").expect("No DATABASE_URL environment variable set");
+    let rocket = rocket::build();
+    let config: Config = rocket.figment().extract().expect("Failed to read config.");
 
     let cli = Cli::parse();
 
     match cli.command {
+        // create a new user, store its credentials into the database
         Commands::CreateUser { name, password } => {
-            use crate::sqlx::Connection;
-            use sqlx::SqliteConnection;
-            let mut conn = SqliteConnection::connect(&db_url)
+            let mut conn = &mut config
+                .database_connection()
                 .await
-                .expect("Could not connect with db.");
+                .expect("failed to connect to db");
             create_or_update_user(&name, &password, &mut conn)
                 .await
                 .expect("Failed to set user.");
         }
+        // starts the web server
         Commands::RunServer => {
-            let pool = build_database_pool(db_url)
-                .await
-                .expect("Failed to get database pool");
-            start_server(pool).await;
+            start_server(rocket, &config).await;
         }
     }
-}
-
-async fn build_database_pool(db_url: String) -> Result<SqlitePool, String> {
-    // Build database connection pool
-    let pool = SqlitePoolOptions::new()
-        .max_connections(16)
-        .connect(&db_url)
-        .await
-        .map_err(|e| format!("failed to get database pool: {:?}", e))?;
-    Ok(pool)
 }
 
 /// Start Scheduler hypervisor service
 /// and Web server.
 /// Both tied to `pool`.
-async fn start_server(pool: SqlitePool) {
+async fn start_server(rocket: Rocket<Build>, config: &Config) {
     // launch process update listener loop
-    let hypervisor_socket = std::env::var("HYPERVISOR_SOCKET_PATH")
-        .expect("No HYPERVISOR_SOCKET_PATH environment variable set");
-    let socket_path = Path::new(&hypervisor_socket).to_path_buf();
+    let socket_path = Path::new(&config.hypervisor_socket_path).to_path_buf();
+    let pool = config.database_pool().await.expect("Failed to build pool.");
     let scheduler_server = SchedulerServer::new(socket_path, pool);
     let scheduler_client = scheduler_server.client();
     scheduler_server.start();
 
     // Load RSA key pair (for auth)
-    let key_pair = auth::KeyPair::load_from(
-        std::env::var("PUBLIC_KEY_PATH").expect("No 'PUBLIC_KEY_PATH' set."),
-        std::env::var("PRIVATE_KEY_PATH").expect("No 'PRIVATE_KEY_PATH' set."),
-    )
-    .await
-    .expect("Could not read key pair");
+    let key_pair = auth::KeyPair::load_from(&config.public_key_path, &config.private_key_path)
+        .await
+        .expect("Could not read key pair");
 
-    // launch HTTP server
-    let result = rocket::build()
+    let result = rocket
         .manage(scheduler_client)
         .manage(key_pair)
         .mount(

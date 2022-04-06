@@ -11,7 +11,6 @@ rocket = { version = "0.5.0-rc.1",  features = ["secrets", "json" ] }
 # async sql queries
 sqlx = { version = "*", features = [ "runtime-tokio-rustls", "chrono", "sqlite", "migrate", "macros", "offline"] }
 
-dotenv = "*"
 nix = "*"
 chrono = { version = "*", features = ["serde"] }
 serde = "*" # serialization

@@ -1984,7 +1984,6 @@ dependencies = [
  "bincode",
  "chrono",
  "clap",
- "dotenv",
  "jaded",
  "jsonwebtoken",
  "nix",
