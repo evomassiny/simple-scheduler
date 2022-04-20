@@ -5,10 +5,12 @@ use crate::tasks::TaskHandle;
 use rocket::tokio::{
     self,
     net::{UnixListener, UnixStream},
+    time::{self, Duration, Instant},
 };
 use sqlx::sqlite::SqlitePool;
 use std::error::Error;
 use std::path::PathBuf;
+use std::collections::HashSet;
 
 pub use crate::scheduling::client::SchedulerClient;
 
@@ -97,6 +99,15 @@ impl SchedulerServer {
     ) -> Result<(), Box<dyn Error>> {
         let mut conn = self.pool.acquire().await?;
         let mut task = Task::get_by_handle(handle, &mut conn).await?;
+
+        if task.status.is_finished() {
+            // If the current stored status is already finished,
+            // we already set the state of the current task through another mean
+            // (eg: by crawling the monitors files directly)
+            //
+            return Ok(());
+        }
+
         task.status = Status::from_task_status(task_status);
 
         if task.status.is_finished() {
@@ -111,47 +122,51 @@ impl SchedulerServer {
 
         let mut job = Job::get_by_id(task.job, &mut conn).await?;
 
-        for task in Task::select_by_job(task.job, &mut conn).await? {
-            if !task.status.is_finished() {
-                // if there is remaining tasks
-                // no need to update job staus
-                return Ok(());
-            }
-        }
-
-        let tasks = Task::select_by_job(task.job, &mut conn).await?;
-
-        // job status:
-        // * If all task failed => failure
-        // * If ONE task canceled => Canceled
-        // * If ONE task Stopped => Stopped
-        // * If ONE task Killed => killed
-        // * if mix failure/succed => succeed
-        let mut job_status = Status::Failed;
-        for task in &tasks {
-            match task.status {
-                Status::Stopped => {
-                    job_status = Status::Stopped;
-                    break;
-                },
-                Status::Canceled => {
-                    job_status = Status::Canceled;
-                    break;
-                },
-                Status::Killed => {
-                    job_status = Status::Killed;
-                    break;
-                },
-                Status::Succeed => {
-                    job_status = Status::Succeed;
-                },
-                _ => {}
-            }
-        }
-        job.status = job_status;
-        let _ = job.update(&mut conn).await?;
+        let _ = job.update_state_from_task_ones(&mut conn).await?;
         Ok(())
     }
+
+    /// Check for all unfinished tasks if a status file does not exists,
+    /// if so, read it and update the corresponding tasks.
+    ///
+    /// This is usefull if for whatever reason the connection between a monitor process and 
+    /// the scheduler server fails. We can crawl the file system to 
+    /// fetch the task status.
+    /// 
+    /// If everything went well, return the number of updated tasks
+    async fn scan_disk_for_finished_tasks(&self) -> Result<usize, Box<dyn Error>> {
+        let mut conn = self.pool.acquire().await?;
+        let non_terminated_tasks = Task::select_non_terminated(&mut conn).await?;
+
+        let mut count = 0;
+        let mut jobs: HashSet<i64> = HashSet::new();
+        for task in &non_terminated_tasks {
+            let monitor_handle = task.handle();
+
+            if !monitor_handle.has_status_file().await {
+                continue;
+            }
+            let task_status = monitor_handle.get_status().await?;
+            let _= self.update_task_state(&task.handle, &task_status).await?;
+            // store job id, update it in a later pass
+            jobs.insert(task.job);
+            // count the number of crawled tasks
+            count += 1;
+        }
+
+        // update related jobs state
+        for job_id in jobs {
+            let mut job = Job::get_by_id(job_id, &mut conn).await?;
+            let _ = job.update_state_from_task_ones(&mut conn).await?;
+
+        }
+        if count > 0 {
+            let _ = self.update_work_queue().await?;
+        }
+
+        Ok(count)
+    }
+
 
     /// Ask each monitor process to SIGKILL its monitoree task
     async fn kill_job(&self, job_id: i64) -> Result<(), Box<dyn std::error::Error>> {
@@ -236,27 +251,55 @@ impl SchedulerServer {
     /// NOTE: Failure are only logged, this loop should live as long as the web server.
     pub fn start(self) {
         tokio::task::spawn(async move {
+            // start by checking for any allready finished tasks
+            if let Err(e) = self.scan_disk_for_finished_tasks().await {
+                eprintln!(
+                    "failed to scan finished tasks {:?}",
+                    e,
+                );
+            }
             // remove the socket file
             let _ = std::fs::remove_file(&self.socket);
             let listener =
                 UnixListener::bind(&self.socket).expect("Cant bind to hypervisor socket.");
 
+            let interval = Duration::from_secs(60);
+            let timer = time::sleep(interval);
+            tokio::pin!(timer);
+
             loop {
-                match listener.accept().await {
-                    Ok((mut stream, _addr)) => {
-                        if let Err(e) = self.process_msg(&mut stream).await {
-                            // TODO: use syslog or rocket's own logging utility
-                            eprintln!("Error while processing update msg: {:?}", e);
+                tokio::select! {
+                    // Periodically check for finished but un-handled tasks
+                    () = &mut timer => {
+                        if let Err(e) = self.scan_disk_for_finished_tasks().await {
+                            eprintln!(
+                                "failed to scan finished tasks {:?}",
+                                e,
+                            );
                         }
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Connection to hypervisor socket '{:?}' failed: {:?}",
-                            &self.socket, e,
-                        );
+                        // reset timer
+                        timer.as_mut().reset(Instant::now() + interval);
+                    },
+                    // also listen for messages, either from the web app or from a monitor process.
+                    connection = listener.accept() => {
+                        match connection {
+                            Ok((mut stream, _addr)) => {
+                                if let Err(e) = self.process_msg(&mut stream).await {
+                                    // TODO: use syslog or rocket's own logging utility
+                                    eprintln!("Error while processing update msg: {:?}", e);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "Connection to hypervisor socket '{:?}' failed: {:?}",
+                                    &self.socket, e,
+                                );
+                            }
+                        }
                     }
                 }
             }
         });
     }
+
 }

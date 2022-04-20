@@ -25,7 +25,7 @@ impl AuthToken {
 
     fn is_still_valid(&self) -> bool {
         let now = Utc::now();
-        self.creation + Duration::days(AUTH_COOKIE_VALID_PERIOD_IN_DAYS) <=  now
+        (self.creation + Duration::days(AUTH_COOKIE_VALID_PERIOD_IN_DAYS)) >=  now
     }
 
     pub fn new(user: User<Existing>) -> Option<Self> {
@@ -50,7 +50,9 @@ impl<'r> FromRequest<'r> for AuthToken {
         if let Some(cookie) = req.cookies().get_private(AUTH_COOKIE_NAME) {
             let auth = serde_json::from_str::<Self>(cookie.value());
             if let Ok(auth_token) = auth {
-                return Outcome::Success(auth_token);
+                if auth_token.is_still_valid() {
+                    return Outcome::Success(auth_token);
+                }
             }
         }
         Outcome::Failure((Status::Forbidden, ()))

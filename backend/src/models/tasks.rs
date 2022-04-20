@@ -235,6 +235,68 @@ impl Task {
         // sqlite only support isize
         Ok(count as usize)
     }
+    
+    /// query database and return all tasks which are 
+    /// either in `Pending` or `Running` state.
+    pub async fn select_non_terminated(
+        conn: &mut SqliteConnection,
+    ) -> Result<Vec<Self>, ModelError> {
+        let mut tasks: Vec<Task> = Vec::new();
+        let mut rows = sqlx::query(
+            "SELECT id, job, name, status, handle, stderr, stdout \
+                FROM tasks WHERE status in (0, 5)", // 0 => Pending, 5 => Running
+        )
+        .fetch(&mut *conn);
+
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| ModelError::DbError(e.to_string()))?
+        {
+            let status_code = row
+                .try_get("status")
+                .map_err(|_| ModelError::ColumnError("status".to_string()))?;
+            let status = Status::from_u8(status_code)
+                .map_err(|_| ModelError::ColumnError("status code".to_string()))?;
+
+            let task_id: i64 = row
+                .try_get("id")
+                .map_err(|_| ModelError::ColumnError("id".to_string()))?;
+
+            tasks.push(Self {
+                id: Some(task_id),
+                name: row
+                    .try_get("name")
+                    .map_err(|_| ModelError::ColumnError("name".to_string()))?,
+                handle: row
+                    .try_get("handle")
+                    .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
+                job: row
+                    .try_get("job")
+                    .map_err(|_| ModelError::ColumnError("job".to_string()))?,
+                status,
+                stderr: row
+                    .try_get("stderr")
+                    .map_err(|_| ModelError::ColumnError("command".to_string()))?,
+                stdout: row
+                    .try_get("stdout")
+                    .map_err(|_| ModelError::ColumnError("command".to_string()))?,
+                command_args: Vec::new(),
+            });
+        }
+        drop(rows);
+
+        for task in tasks.iter_mut() {
+            task.command_args.extend(
+                TaskCommandArgs::select_by_task(
+                    task.id.ok_or(ModelError::ModelNotFound)?,
+                    &mut *conn,
+                )
+                .await?
+            );
+        }
+        Ok(tasks)
+    }
 }
 
 /// This struct is an abstraction over the `task_dependencies` SQL table,

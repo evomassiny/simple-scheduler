@@ -2,7 +2,7 @@ use crate::messaging::TaskStatus;
 
 
 /// State of job/task
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     /// waiting to be scheduled
     Pending,

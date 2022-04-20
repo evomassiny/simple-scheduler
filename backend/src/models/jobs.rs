@@ -4,6 +4,7 @@ use crate::models::{
     Status,
     User,
     Existing,
+    Task,
 };
 use chrono::{NaiveDateTime, Utc};
 use crate::sqlx::Row;
@@ -176,6 +177,59 @@ impl Job {
         let status = Status::from_u8(status_code)
             .map_err(|_| ModelError::ColumnError("status".to_string()))?;
         Ok(status)
+    }
+
+    /// Lookup state of all tasks composing the job, and update self.status accordingly.
+    /// (commit changes in DB).
+    /// 
+    /// * If all task failed => failure
+    /// * If ONE task canceled => Canceled
+    /// * If ONE task Stopped => Stopped
+    /// * If ONE task Killed => killed
+    /// * if mix failure/succed => succeed
+    pub async fn update_state_from_task_ones(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
+        let job_id = self.id.ok_or(ModelError::ModelNotFound)?;
+
+        let tasks = Task::select_by_job(job_id, &mut *conn).await?;
+
+        let mut pending_count: usize = 0;
+        let mut job_status = Status::Failed;
+        for task in &tasks {
+            match task.status {
+                Status::Stopped => {
+                    job_status = Status::Stopped;
+                    break;
+                },
+                Status::Pending => {
+                    pending_count += 1;
+                },
+                Status::Running => {
+                    job_status = Status::Running;
+                    break;
+                },
+                Status::Canceled => {
+                    job_status = Status::Canceled;
+                    break;
+                },
+                Status::Killed => {
+                    job_status = Status::Killed;
+                    break;
+                },
+                Status::Succeed => {
+                    job_status = Status::Succeed;
+                },
+                _ => {}
+            }
+        }
+        if pending_count == tasks.len() {
+            job_status = Status::Pending;
+        }
+        if job_status != self.status {
+            self.status = job_status;
+            let _ = self.update(conn).await?;
+        }
+        Ok(())
+
     }
 }
 

@@ -122,7 +122,7 @@ impl TaskHandle {
     }
 
     /// See if a PID file exists to guess if the task is running or not.
-    pub async fn is_running(&self) -> bool {
+    pub async fn is_monitor_running(&self) -> bool {
         metadata(self.pid_file()).await.is_ok()
     }
 
@@ -163,7 +163,7 @@ impl TaskHandle {
 
     /// kill the task
     pub async fn kill(&self) -> Result<(), Box<dyn std::error::Error>> {
-        if !self.is_running().await {
+        if !self.is_monitor_running().await {
             return Err("task is not running".into());
         }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
@@ -172,18 +172,23 @@ impl TaskHandle {
 
     /// ask the task to terminate
     pub async fn terminate(&self) -> Result<(), Box<dyn std::error::Error>> {
-        if !self.is_running().await {
+        if !self.is_monitor_running().await {
             return Err("task is not running".into());
         }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
         ExecutorQuery::Terminate.async_send_to(&mut sock).await
     }
 
+    /// check presence of status file
+    pub async fn has_status_file(&self) -> bool {
+        if let Ok(_md) = metadata(self.status_file()).await {
+            return true;
+        }
+        return false;
+    }
+
     /// return the status of the task
     pub async fn get_status(&self) -> Result<TaskStatus, Box<dyn std::error::Error>> {
-        //if !self.is_running().await {
-        //return Err("task is not running".into());
-        //}
         // check if status file exists
         if let Ok(_md) = metadata(self.status_file()).await {
             return TaskStatus::async_from_file(&self.status_file()).await;

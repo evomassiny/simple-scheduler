@@ -1,15 +1,14 @@
 use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
 use crate::models::{Batch, ModelError, User, Existing};
-use crate::tokio::net::UnixStream;
+use rocket::tokio::net::UnixStream;
 use crate::workflows::WorkFlowGraph;
 use rocket::fs::TempFile as RocketTempFile;
 use rocket::http::ContentType;
 use rocket::tokio::{self, fs::File, io::AsyncReadExt};
 use sqlx::sqlite::SqlitePool;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use tempfile::NamedTempFile;
-use zip::ZipArchive;
 
 #[derive(Debug)]
 pub enum SchedulerClientError {
