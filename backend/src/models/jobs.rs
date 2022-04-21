@@ -192,19 +192,18 @@ impl Job {
 
         let tasks = Task::select_by_job(job_id, &mut *conn).await?;
 
-        let mut pending_count: usize = 0;
+         for task in &tasks {
+            if !task.status.is_finished() {
+                // if there is remaining tasks
+                // no need to update job staus
+                return Ok(());
+            }
+        }
         let mut job_status = Status::Failed;
         for task in &tasks {
             match task.status {
                 Status::Stopped => {
                     job_status = Status::Stopped;
-                    break;
-                },
-                Status::Pending => {
-                    pending_count += 1;
-                },
-                Status::Running => {
-                    job_status = Status::Running;
                     break;
                 },
                 Status::Canceled => {
@@ -221,13 +220,9 @@ impl Job {
                 _ => {}
             }
         }
-        if pending_count == tasks.len() {
-            job_status = Status::Pending;
-        }
-        if job_status != self.status {
-            self.status = job_status;
-            let _ = self.update(conn).await?;
-        }
+        self.status = job_status;
+        let _ = self.update(conn).await?;
+
         Ok(())
 
     }

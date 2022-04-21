@@ -121,9 +121,9 @@ impl TaskHandle {
             .to_string()
     }
 
-    /// See if a PID file exists to guess if the task is running or not.
+    /// See if a monitor socket file exists to guess if the task is running or not.
     pub async fn is_monitor_running(&self) -> bool {
-        metadata(self.pid_file()).await.is_ok()
+        metadata(self.monitor_socket()).await.is_ok()
     }
 
     /// save task PID into `self.pid_file()` (as text).
@@ -208,4 +208,5 @@ impl TaskHandle {
         remove_dir_all(&self.directory).await?;
         Ok(())
     }
+
 }

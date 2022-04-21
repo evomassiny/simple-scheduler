@@ -109,20 +109,24 @@ impl SchedulerServer {
         }
 
         task.status = Status::from_task_status(task_status);
+        let task_handle = task.handle();
 
         if task.status.is_finished() {
-            let task_handle = task.handle();
-            // read and store stderr, and stdout
-            task.stderr = Some(task_handle.read_stderr().await?);
-            task.stdout = Some(task_handle.read_stdout().await?);
-            // Clean-up file system
-            task_handle.cleanup().await?;
+            // read and store stderr + stdout
+            if let Ok(stderr) = task_handle.read_stderr().await {
+                task.stderr = Some(stderr);
+            }
+            if let Ok(stdout) = task_handle.read_stdout().await {
+                task.stdout = Some(stdout);
+            }
         }
         let _ = task.update(&mut conn).await?;
 
         let mut job = Job::get_by_id(task.job, &mut conn).await?;
 
         let _ = job.update_state_from_task_ones(&mut conn).await?;
+        // Clean-up file system
+        task_handle.cleanup().await?;
         Ok(())
     }
 
@@ -159,9 +163,6 @@ impl SchedulerServer {
             let mut job = Job::get_by_id(job_id, &mut conn).await?;
             let _ = job.update_state_from_task_ones(&mut conn).await?;
 
-        }
-        if count > 0 {
-            let _ = self.update_work_queue().await?;
         }
 
         Ok(count)
@@ -251,29 +252,38 @@ impl SchedulerServer {
     /// NOTE: Failure are only logged, this loop should live as long as the web server.
     pub fn start(self) {
         tokio::task::spawn(async move {
-            // start by checking for any allready finished tasks
+            // remove the socket file
+            let _ = std::fs::remove_file(&self.socket);
+            let listener =
+                UnixListener::bind(&self.socket).expect("Cant bind to hypervisor socket.");
+
+            // setup recurrent timer for "garbage collector"
+            let interval = Duration::from_secs(60);
+            let timer = time::sleep(interval);
+            tokio::pin!(timer);
+            
+            // start by checking for any already finished tasks
             if let Err(e) = self.scan_disk_for_finished_tasks().await {
                 eprintln!(
                     "failed to scan finished tasks {:?}",
                     e,
                 );
             }
-            // remove the socket file
-            let _ = std::fs::remove_file(&self.socket);
-            let listener =
-                UnixListener::bind(&self.socket).expect("Cant bind to hypervisor socket.");
-
-            let interval = Duration::from_secs(60);
-            let timer = time::sleep(interval);
-            tokio::pin!(timer);
 
             loop {
                 tokio::select! {
                     // Periodically check for finished but un-handled tasks
+                    // if some are found, collect their status and outputs
                     () = &mut timer => {
                         if let Err(e) = self.scan_disk_for_finished_tasks().await {
                             eprintln!(
                                 "failed to scan finished tasks {:?}",
+                                e,
+                            );
+                        }
+                        if let Err(e) = self.update_work_queue().await {
+                            eprintln!(
+                                "failed to update work queue {:?}",
                                 e,
                             );
                         }

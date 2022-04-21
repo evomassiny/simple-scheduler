@@ -216,8 +216,6 @@ impl Monitor {
         }
         // remove the socket file
         std::fs::remove_file(&self.handle.monitor_socket())?;
-        // remove the pid file
-        std::fs::remove_file(&self.handle.pid_file())?;
 
         Ok(())
     }
