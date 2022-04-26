@@ -33,10 +33,10 @@ pub async fn submit_job(
         .acquire()
         .await
         .map_err(|e| Custom(HttpStatus::InternalServerError, e.to_string()))?;
-    let user = auth
-        .fetch_user(&mut conn)
-        .await
-        .ok_or(Custom(HttpStatus::InternalServerError, "unknown user".to_string()))?;
+    let user = auth.fetch_user(&mut conn).await.ok_or(Custom(
+        HttpStatus::InternalServerError,
+        "unknown user".to_string(),
+    ))?;
     // submit job
     let job_id = scheduler
         .submit_from_tempfile(&mut uploaded_file.file, &user)

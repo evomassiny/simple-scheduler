@@ -1,6 +1,10 @@
-use crate::messaging::{AsyncSendable, ExecutorQuery, TaskStatus};
+use crate::messaging::{AsyncSendable, ExecutorQuery, TaskStatus, ToSchedulerMsg};
 use nix::unistd::Pid;
-use rocket::tokio::{fs::{File,metadata,remove_dir_all}, io::AsyncReadExt, net::UnixStream};
+use rocket::tokio::{
+    fs::{metadata, File},
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::UnixStream,
+};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -155,10 +159,16 @@ impl TaskHandle {
         let mut sock = UnixStream::connect(&self.monitor_socket())
             .await
             .map_err(|_| format!("Could not open socket {:?}", &self.monitor_socket()))?;
-        ExecutorQuery::Start
+        let _ = ExecutorQuery::Start
             .async_send_to(&mut sock)
             .await
-            .map_err(|_| "Could not send status request to socket".to_string().into())
+            .map_err(|_| {
+                "Could not send status request to socket"
+                    .to_string()
+                    .to_string()
+            })?;
+        sock.shutdown().await?;
+        Ok(())
     }
 
     /// kill the task
@@ -167,7 +177,9 @@ impl TaskHandle {
             return Err("task is not running".into());
         }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
-        ExecutorQuery::Kill.async_send_to(&mut sock).await
+        let _ = ExecutorQuery::Kill.async_send_to(&mut sock).await?;
+        sock.shutdown().await?;
+        Ok(())
     }
 
     /// ask the task to terminate
@@ -176,7 +188,9 @@ impl TaskHandle {
             return Err("task is not running".into());
         }
         let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
-        ExecutorQuery::Terminate.async_send_to(&mut sock).await
+        ExecutorQuery::Terminate.async_send_to(&mut sock).await?;
+        sock.shutdown().await?;
+        Ok(())
     }
 
     /// check presence of status file
@@ -188,25 +202,96 @@ impl TaskHandle {
     }
 
     /// return the status of the task
-    pub async fn get_status(&self) -> Result<TaskStatus, Box<dyn std::error::Error>> {
+    pub async fn get_status_from_file(&self) -> Result<TaskStatus, Box<dyn std::error::Error>> {
         // check if status file exists
-        if let Ok(_md) = metadata(self.status_file()).await {
-            return TaskStatus::async_from_file(&self.status_file()).await;
-        }
-        let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
-        ExecutorQuery::GetStatus.async_send_to(&mut sock).await?;
-        TaskStatus::async_read_from(&mut sock).await
+        let _ = metadata(self.status_file()).await?;
+        TaskStatus::async_from_file(&self.status_file()).await
     }
 
-    /// Remove the process handle directory containing:
+    /// Configure a running monitor process to use a new socket to reach the scheduler.
+    pub async fn configure_hypervisor_socket(
+        &self,
+        socket: PathBuf,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // check if status file exists
+        let _ = metadata(self.monitor_socket()).await?; // check that the monitor file exists
+        let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
+        ExecutorQuery::SetHypervisorSocket(socket)
+            .async_send_to(&mut sock)
+            .await?;
+        let response = ToSchedulerMsg::async_read_from(&mut sock).await?;
+        sock.shutdown().await?;
+        match response {
+            ToSchedulerMsg::Ok => Ok(()),
+            msg => Err(format!(
+                "Error while re-configuring monitor socket ({:?}), {:?}",
+                &self.directory, &msg
+            )
+            .into()),
+        }
+    }
+
+    /// Ask the monitor process to contact the hypervisor to communicate its status.
+    pub async fn request_status_notification(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.is_monitor_running().await {
+            return Err(format!(
+                "monitor {:?} is not running. Cannot order status update.",
+                &self.directory
+            )
+            .into());
+        }
+        let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
+
+        if let Err(e) = ExecutorQuery::RequestStatusNotification
+            .async_send_to(&mut sock)
+            .await
+        {
+            dbg!(&e);
+            return Err(e);
+        }
+        let response = ToSchedulerMsg::async_read_from(&mut sock).await?;
+        sock.shutdown().await?;
+        match response {
+            ToSchedulerMsg::Ok => Ok(()),
+            msg => Err(format!(
+                "Error while requesting status for monitor ({:?}), {:?}",
+                &self.directory, &msg
+            )
+            .into()),
+        }
+    }
+
+    /// Ask the monitor process to terminate, and clean up after itself.
+    /// The monitor should remove:
     /// * stderr file,
     /// * stdout file,
     /// * status file,
     /// * PID file,
     /// * cwd directory
-    pub async fn cleanup(self) -> Result<(), Box<dyn std::error::Error>> {
-        remove_dir_all(&self.directory).await?;
-        Ok(())
+    /// * monitor socket
+    pub async fn terminate_monitor(self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.is_monitor_running().await {
+            return Err(format!(
+                "monitor {:?} is not running. Cannot order termination.",
+                &self.directory
+            )
+            .into());
+        }
+        let mut sock = UnixStream::connect(&self.monitor_socket()).await?;
+        // send termination requests
+        ExecutorQuery::TerminateMonitor
+            .async_send_to(&mut sock)
+            .await?;
+        // read ACK
+        let response = ToSchedulerMsg::async_read_from(&mut sock).await?;
+        let e = sock.shutdown().await?;
+        match response {
+            ToSchedulerMsg::Ok => Ok(()),
+            msg => Err(format!(
+                "Error while terminating monitor, ({:?}), {:?}",
+                &self.directory, &msg
+            )
+            .into()),
+        }
     }
-
 }

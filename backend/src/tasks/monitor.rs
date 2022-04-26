@@ -10,6 +10,7 @@ use nix::{
     },
     unistd::{close, Pid},
 };
+use std::io::Read;
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -18,6 +19,7 @@ use std::{
         net::{UnixListener, UnixStream},
     },
     path::PathBuf,
+    time::Duration,
 };
 
 /// Epoll will wait forever (unless an event happens) if this timeout value is provided
@@ -30,6 +32,7 @@ pub struct Monitor {
     pub status: TaskStatus,
     pub handle: TaskHandle,
     pub hypervisor_socket: Option<PathBuf>,
+    pub update_message_count: i64,
 }
 
 impl Monitor {
@@ -58,35 +61,46 @@ impl Monitor {
     fn send_status(&self, stream: &mut UnixStream) -> Result<(), Box<dyn std::error::Error>> {
         println!("Sending status");
         let _ = self.status.send_to(stream)?;
-        stream.shutdown(std::net::Shutdown::Write)?;
         Ok(())
     }
 
-    fn process_query(
+    /// re-configure hypervisor socket address,
+    /// and return an ACK to the sender.
+    fn set_hypervisor_socket(
         &mut self,
-        query: ExecutorQuery,
+        sock: PathBuf,
         stream: &mut UnixStream,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        match query {
-            ExecutorQuery::Start => self.start()?,
-            ExecutorQuery::Kill => self.kill()?,
-            ExecutorQuery::Terminate => self.terminate()?,
-            ExecutorQuery::GetStatus => self.send_status(stream)?,
-            ExecutorQuery::SetHypervisorSocket(sock) => self.hypervisor_socket = sock,
-        }
+        self.hypervisor_socket = Some(sock);
+        let msg = ToSchedulerMsg::Ok;
+        let _ = msg.send_to(stream)?;
         Ok(())
     }
 
     /// connect to the hypervisor socket and send a status update
-    fn notify_hypervisor(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn notify_hypervisor(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref hypervisor_socket) = self.hypervisor_socket {
-            let mut stream = UnixStream::connect(hypervisor_socket)?;
             let msg = ToSchedulerMsg::StatusUpdate {
                 task_handle: self.handle.directory.clone(),
                 status: self.status.clone(),
+                update_version: self.update_message_count,
             };
-            let _ = msg.send_to(&mut stream)?;
-            stream.shutdown(std::net::Shutdown::Write)?;
+            self.update_message_count += 1;
+            let hypervisor_socket = hypervisor_socket.clone();
+
+            let mut stream = UnixStream::connect(&*hypervisor_socket)
+                .map_err(|e| format!("Failed to connect to hypervisor {:?}", e))?;
+            let _ = msg
+                .send_to(&mut stream)
+                .map_err(|e| format!("Failed to send status to hypervisor {:?}", e))?;
+            // expect ACK from server
+            match ExecutorQuery::read_from(&mut stream) {
+                Ok(ExecutorQuery::Ok) => {
+                    // here we are the client, so we should shutdown the connection
+                    stream.shutdown(std::net::Shutdown::Both)?;
+                }
+                _ => eprintln!("Expecting ACK"),
+            }
         }
         Ok(())
     }
@@ -112,7 +126,7 @@ impl Monitor {
             )
         })?;
         listener.set_nonblocking(true)?;
-        let listener_fd: RawFd = listener.as_raw_fd();
+        let socket_listener_fd: RawFd = listener.as_raw_fd();
 
         // open SIG_CHLD as a RawFd, so we can poll it
         let mut mask = SigSet::empty();
@@ -123,7 +137,7 @@ impl Monitor {
         // setup epoll
         let epoll_fd: RawFd = epoll_create()?;
 
-        // submit SIGCHLD fd and socket fd to epoll
+        // register SIGCHLD fd to epoll
         let mut sigchild_event = EpollEvent::new(EpollFlags::EPOLLIN, sigchild_fd.try_into()?);
         epoll_ctl(
             epoll_fd,
@@ -131,11 +145,13 @@ impl Monitor {
             sigchild_fd,
             Some(&mut sigchild_event),
         )?;
-        let mut listener_event = EpollEvent::new(EpollFlags::EPOLLIN, listener_fd.try_into()?);
+        // register socket listener fd to epoll
+        let mut listener_event =
+            EpollEvent::new(EpollFlags::EPOLLIN, socket_listener_fd.try_into()?);
         epoll_ctl(
             epoll_fd,
             EpollOp::EpollCtlAdd,
-            listener_fd,
+            socket_listener_fd,
             Some(&mut listener_event),
         )?;
 
@@ -152,28 +168,22 @@ impl Monitor {
         }
 
         // start the event loop:
-        'event_loop: while let Ok(event_count) =
+        'wait_loop: while let Ok(event_count) =
             epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT)
         // wait for event completion
         {
-            for event in events.iter().take(event_count) {
+            'process_loop: for event in events.iter().take(event_count) {
                 // fetch the data we've associated with the event (file descriptors)
                 let fd: RawFd = event.data().try_into()?;
                 match fd {
-                    // the task has terminated
+                    // the child process has returned a status
                     fd if fd == sigchild_fd => {
-                        self.status = match sigchild_reader.read_signal() {
-                            Ok(Some(siginfo)) => {
-                                TaskStatus::from_siginfo(&siginfo).unwrap_or(TaskStatus::Failed)
-                            }
-                            _ => TaskStatus::Failed, // assume failure, if nothing is returned
-                        };
-                        if self.status.is_terminated() {
-                            break 'event_loop;
+                        if let Err(error) = self.process_child_status(&mut sigchild_reader) {
+                            eprintln!("Failed to process SIGCHILD: {:?}", error);
                         }
                     }
-                    // a client connected to the socket
-                    fd if fd == listener_fd => {
+                    // a client connected to the monitor socket
+                    fd if fd == socket_listener_fd => {
                         // won't block (epolled)
                         let stream = streams
                             .next()
@@ -185,7 +195,7 @@ impl Monitor {
                         // store the stream
                         streams_by_fd.insert(stream_fd, stream);
                     }
-                    // data is ready to read on one of the connection
+                    // data is ready to be read on one of the connection
                     stream_fd => {
                         // fetch the stream for the fd, and process the request
                         let mut stream = streams_by_fd.remove(&stream_fd).ok_or_else(|| {
@@ -193,12 +203,14 @@ impl Monitor {
                         })?;
                         // unregister the stream from the epoll
                         epoll_ctl(epoll_fd, EpollOp::EpollCtlDel, stream_fd, None)?;
-                        // read queries from the stream, ignore failures
-                        match ExecutorQuery::read_from(&mut stream) {
-                            Ok(query) => {
-                                self.process_query(query, &mut stream)?;
+                        match self.process_incoming_request(&mut stream) {
+                            Ok(true) => {
+                                // Cleanup whole process directory.
+                                let _ = std::fs::remove_dir_all(&self.handle.directory);
+                                break 'wait_loop;
                             }
-                            Err(e) => eprintln!("bad query: {:?}", e),
+                            Ok(false) => continue 'process_loop,
+                            Err(error) => eprintln!("Could not process query {:?}", error),
                         }
                     }
                 }
@@ -206,17 +218,73 @@ impl Monitor {
         }
         // Close all opened RawFds
         close(epoll_fd)?;
-        // write status to file
-        self.status.save_to_file(&self.handle.status_file())?;
+        Ok(())
+    }
+
+    /// Process an incoming request.
+    /// (expects a `ExecutorQuery` object sent through `stream`).
+    ///
+    /// Return True, if the request ask for termination.
+    fn process_incoming_request(
+        &mut self,
+        stream: &mut UnixStream,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        // read queries from the stream, ignore failures
+        let query = ExecutorQuery::read_from(&mut *stream)?;
+
+        let mut must_quit: bool = false;
+        match query {
+            ExecutorQuery::Start => self.start()?,
+            ExecutorQuery::Kill => self.kill()?,
+            ExecutorQuery::Terminate => self.terminate()?,
+            ExecutorQuery::GetStatus => self.send_status(stream)?,
+            ExecutorQuery::SetHypervisorSocket(sock) => self.set_hypervisor_socket(sock, stream)?,
+            ExecutorQuery::TerminateMonitor => {
+                let msg = ToSchedulerMsg::Ok;
+                let _ = msg.send_to(stream)?;
+                must_quit = true;
+            }
+            ExecutorQuery::RequestStatusNotification => {
+                self.notify_hypervisor()?;
+                let msg = ToSchedulerMsg::Ok;
+                let _ = msg.send_to(stream)?;
+            }
+            ExecutorQuery::Ok => unreachable!(),
+        }
+        // wait for the client to close the connection (for at most 10s)
+        if let Err(e) = stream.set_read_timeout(Some(Duration::new(20, 0))) {
+            eprintln!("Failed to set read timeout: {:?}", e)
+        } else {
+            // wait for a 0 byte read, eg: EOF
+            let _ = stream.read(&mut []);
+        }
+
+        Ok(must_quit)
+    }
+
+    /// Read the status of the child process through `sigchild_reader`,
+    /// and notify the hypervisor about it.
+    /// Also store the status to file if the process is terminated.
+    fn process_child_status(
+        &mut self,
+        sigchild_reader: &mut SignalFd,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.status = match sigchild_reader.read_signal() {
+            Ok(Some(siginfo)) => TaskStatus::from_siginfo(&siginfo).unwrap_or(TaskStatus::Failed),
+            _ => TaskStatus::Failed, // assume failure, if nothing is returned
+        };
+        // notify hypervisor
         if let Err(error) = self.notify_hypervisor() {
             eprintln!(
                 "Failed to send status to hypervisor through socket: '{:?}': '{:?}'",
                 self.hypervisor_socket, error
             );
         }
-        // remove the socket file
-        std::fs::remove_file(&self.handle.monitor_socket())?;
-
+        // save termination status
+        if self.status.is_terminated() {
+            // write status to file
+            self.status.save_to_file(&self.handle.status_file())?;
+        }
         Ok(())
     }
 }

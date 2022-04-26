@@ -51,7 +51,9 @@ pub enum ToSchedulerMsg {
     StatusUpdate {
         task_handle: PathBuf,
         status: TaskStatus,
+        update_version: i64,
     },
-    JobAppended,
     KillJob(i64),
+    JobAppended,
+    Ok,
 }

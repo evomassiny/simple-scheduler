@@ -1,7 +1,7 @@
 use crate::auth::AuthToken;
 use crate::auth::KeyPair;
 use crate::scheduling::SchedulerClient;
-use rocket::http::{Status,CookieJar};
+use rocket::http::{CookieJar, Status};
 use rocket::tokio::{self, fs::File, io::AsyncReadExt};
 use rocket::{form::Form, fs::TempFile, State};
 use tempfile::NamedTempFile;
@@ -31,8 +31,8 @@ impl<'r> CredentialFileForm<'r> {
     }
 }
 
-/// parse any provided credential file, if the 
-/// referenced user is valid, stored an authentification token, 
+/// parse any provided credential file, if the
+/// referenced user is valid, stored an authentification token,
 /// (client side, in a cookie).
 ///
 /// This token will then be used to discriminate authorized users.
@@ -55,13 +55,13 @@ pub async fn login(
 
     if let Some(credential) = maybe_credential {
         match credential.get_user(&mut conn).await {
-            Some(user) => { 
+            Some(user) => {
                 // safe to unwrap because get_user() asserts that user exists.
                 let token = AuthToken::new(user).unwrap();
                 let cookie = token.as_cookie().into_owned();
                 cookies.add_private(cookie);
                 return (Status::Ok, "success");
-            },
+            }
             None => return (Status::Forbidden, "wrong user"),
         }
     }

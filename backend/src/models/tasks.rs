@@ -1,13 +1,9 @@
-use crate::models::{
-    Model,
-    ModelError,
-    Status
-};
-use crate::tasks::TaskHandle;
-use crate::sqlx::Row;
-use sqlx::sqlite::SqliteConnection;
+use crate::models::{Model, ModelError, Status};
 use crate::rocket::futures::TryStreamExt;
+use crate::sqlx::Row;
+use crate::tasks::TaskHandle;
 use async_trait::async_trait;
+use sqlx::sqlite::SqliteConnection;
 use std::path::PathBuf;
 
 /// This `Task` struct implements abstraction over the `tasks` SQL table,
@@ -18,6 +14,7 @@ use std::path::PathBuf;
 ///       name VARCHAR(256) NOT NULL DEFAULT "",
 ///       handle VARCHAR(512) NOT NULL DEFAULT "",
 ///       status TINYINT NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5, 6)),
+///       last_update_version INTEGER,
 ///       stderr TEXT DEFAULT NULL,
 ///       stdout TEXT DEFAULT NULL,
 ///       job INTEGER,
@@ -39,6 +36,8 @@ pub struct Task {
     pub name: String,
     /// Compeletion status
     pub status: Status,
+    /// last status message version number, (auto incremented by the monitor process)
+    pub last_update_version: Option<i64>,
     /// path to a unix socket (fifo), which can be used to communicate with
     /// the process monitoring this task.
     pub handle: String,
@@ -57,12 +56,13 @@ impl Model for Task {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(
             "UPDATE tasks \
-            SET name = ?, status = ?, handle = ?, \
+            SET name = ?, status = ?, last_update_version = ?, handle = ?, \
             job = ?, stderr = ?, stdout = ? \
             WHERE id = ?",
         )
         .bind(&self.name)
         .bind(self.status.as_u8())
+        .bind(&self.last_update_version)
         .bind(&self.handle)
         .bind(&self.job)
         .bind(&self.stderr)
@@ -81,11 +81,12 @@ impl Model for Task {
 
     async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let query_result = sqlx::query(
-            "INSERT INTO tasks (name, status, handle, job) \
-            VALUES (?, ?, ?, ?)",
+            "INSERT INTO tasks (name, status, last_update_version, handle, job) \
+            VALUES (?, ?, ?, ?, ?)",
         )
         .bind(&self.name)
         .bind(self.status.as_u8())
+        .bind(&self.last_update_version)
         .bind(&self.handle)
         .bind(&self.job)
         .execute(&mut *conn)
@@ -114,7 +115,7 @@ impl Task {
         conn: &mut SqliteConnection,
     ) -> Result<Self, ModelError> {
         let row = sqlx::query(
-            "SELECT id, name, status, handle, job, stderr, stdout \
+            "SELECT id, name, status, last_update_version, handle, job, stderr, stdout \
             FROM tasks WHERE handle = ?",
         )
         .bind(&handle)
@@ -138,6 +139,9 @@ impl Task {
                 .try_get("name")
                 .map_err(|_| ModelError::ColumnError("name".to_string()))?,
             status,
+            last_update_version: row
+                .try_get("last_update_version")
+                .map_err(|_| ModelError::ColumnError("last_update_version".to_string()))?,
             handle: row
                 .try_get("handle")
                 .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
@@ -162,7 +166,7 @@ impl Task {
     ) -> Result<Vec<Self>, ModelError> {
         let mut tasks: Vec<Task> = Vec::new();
         let mut rows = sqlx::query(
-            "SELECT id, name, status, handle, stderr, stdout \
+            "SELECT id, name, status, last_update_version, handle, stderr, stdout \
                 FROM tasks WHERE job = ?",
         )
         .bind(&job_id)
@@ -193,6 +197,9 @@ impl Task {
                     .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
                 job: job_id,
                 status,
+                last_update_version: row
+                    .try_get("last_update_version")
+                    .map_err(|_| ModelError::ColumnError("last_update_version".to_string()))?,
                 stderr: row
                     .try_get("stderr")
                     .map_err(|_| ModelError::ColumnError("command".to_string()))?,
@@ -210,7 +217,7 @@ impl Task {
                     task.id.ok_or(ModelError::ModelNotFound)?,
                     &mut *conn,
                 )
-                .await?
+                .await?,
             );
         }
         Ok(tasks)
@@ -235,17 +242,18 @@ impl Task {
         // sqlite only support isize
         Ok(count as usize)
     }
-    
-    /// query database and return all tasks which are 
-    /// either in `Pending` or `Running` state.
-    pub async fn select_non_terminated(
+
+    /// query database and return tasks by status
+    pub async fn select_by_status(
+        status: &Status,
         conn: &mut SqliteConnection,
     ) -> Result<Vec<Self>, ModelError> {
         let mut tasks: Vec<Task> = Vec::new();
         let mut rows = sqlx::query(
-            "SELECT id, job, name, status, handle, stderr, stdout \
-                FROM tasks WHERE status in (0, 5)", // 0 => Pending, 5 => Running
+            "SELECT id, job, name, status, last_update_version, handle, stderr, stdout \
+                FROM tasks WHERE status = ?", // 0 => Pending, 5 => Running
         )
+        .bind(status.as_u8())
         .fetch(&mut *conn);
 
         while let Some(row) = rows
@@ -275,6 +283,9 @@ impl Task {
                     .try_get("job")
                     .map_err(|_| ModelError::ColumnError("job".to_string()))?,
                 status,
+                last_update_version: row
+                    .try_get("last_update_version")
+                    .map_err(|_| ModelError::ColumnError("last_update_version".to_string()))?,
                 stderr: row
                     .try_get("stderr")
                     .map_err(|_| ModelError::ColumnError("command".to_string()))?,
@@ -292,7 +303,7 @@ impl Task {
                     task.id.ok_or(ModelError::ModelNotFound)?,
                     &mut *conn,
                 )
-                .await?
+                .await?,
             );
         }
         Ok(tasks)
@@ -313,7 +324,7 @@ impl Task {
 /// );
 /// ```
 ///
-/// It represents the dependency between two tasks, basically an edge in the 
+/// It represents the dependency between two tasks, basically an edge in the
 /// whole execution dependencies graph.
 ///
 /// It implements the `crate::models::Model` trait.
@@ -410,7 +421,7 @@ impl TaskDependency {
 #[derive(Debug, Clone)]
 pub struct TaskCommandArgs {
     pub id: Option<i64>,
-    /// the executable argument 
+    /// the executable argument
     pub argument: String,
     /// the argument position
     pub position: i64,
@@ -475,8 +486,7 @@ impl TaskCommandArgs {
             .await
             .map_err(|e| ModelError::DbError(e.to_string()))?
         {
-            command_args.push(
-                 Self {
+            command_args.push(Self {
                 task: Some(task_id),
                 position: row
                     .try_get("position")
@@ -495,7 +505,7 @@ impl TaskCommandArgs {
     pub fn from_strings(command_args: Vec<String>) -> Vec<Self> {
         let mut args: Vec<Self> = Vec::new();
         for (i, arg) in command_args.into_iter().enumerate() {
-            args.push( Self {
+            args.push(Self {
                 task: None,
                 position: i as i64,
                 argument: arg,
@@ -505,4 +515,3 @@ impl TaskCommandArgs {
         args
     }
 }
-

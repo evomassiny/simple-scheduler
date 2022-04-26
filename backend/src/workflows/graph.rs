@@ -18,7 +18,6 @@ pub struct WorkFlowTask {
 }
 
 impl WorkFlowTask {
-
     /// Format executable and executable argument into a list
     /// of shell command arguments.
     pub fn commands(&self) -> Vec<String> {

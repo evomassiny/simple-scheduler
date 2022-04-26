@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use sqlx::sqlite::SqliteConnection;
 
-
 /// Existing (stored in database) model
-pub struct Existing { pub id: i64 }
+pub struct Existing {
+    pub id: i64,
+}
 /// New model
 pub struct New;
 
@@ -41,4 +42,3 @@ pub trait Model {
         Ok(())
     }
 }
-

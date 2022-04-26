@@ -1,18 +1,9 @@
 use crate::models::{
-    Model,
-    ModelError,
-    Status,
-    Job,
-    Task,
-    TaskDependency,
-    TaskCommandArgs,
-    User,
-    Existing,
+    Existing, Job, Model, ModelError, Status, Task, TaskCommandArgs, TaskDependency, User,
 };
-use sqlx::sqlite::SqliteConnection;
 use crate::workflows::WorkFlowGraph;
+use sqlx::sqlite::SqliteConnection;
 use std::collections::HashMap;
-
 
 /// A `Batch` is a graph of task to be executed.
 /// It is a composition of 3 kinds of models:
@@ -30,7 +21,6 @@ pub struct Batch {
 }
 
 impl Batch {
-
     pub async fn from_graph(
         workflow: &WorkFlowGraph,
         user: &User<Existing>,
@@ -56,6 +46,7 @@ impl Batch {
                 id: None,
                 name: graph_task.name.clone(),
                 status: Status::Pending,
+                last_update_version: None,
                 handle: "".to_string(),
                 command_args: TaskCommandArgs::from_strings(graph_task.commands()),
                 job: job_id,
@@ -150,4 +141,3 @@ impl Batch {
         }
     }
 }
-

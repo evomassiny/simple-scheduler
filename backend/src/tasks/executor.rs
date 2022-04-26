@@ -119,6 +119,7 @@ impl TaskHandle {
                                         monitor_ready_barrier: Some(monitor_ready_barrier),
                                         task: child,
                                         status: TaskStatus::Pending,
+                                        update_message_count: 0,
                                         handle,
                                         hypervisor_socket: hypervisor_sock,
                                     };
@@ -175,9 +176,11 @@ impl TaskHandle {
         let mut commands: Vec<CString> = vec![];
 
         for arg in cmd_args {
-            commands.push(CString::new(arg).map_err(|_| "Could not format argument into CString".to_string())?);
+            commands.push(
+                CString::new(arg)
+                    .map_err(|_| "Could not format argument into CString".to_string())?,
+            );
         }
-
         // wrap the blocking function into its own thread, to avoid messing
         // with the current executor
         spawn_blocking(move || {

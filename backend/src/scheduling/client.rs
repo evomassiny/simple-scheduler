@@ -1,9 +1,9 @@
 use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
-use crate::models::{Batch, ModelError, User, Existing};
-use rocket::tokio::net::UnixStream;
+use crate::models::{Batch, Existing, ModelError, User};
 use crate::workflows::WorkFlowGraph;
 use rocket::fs::TempFile as RocketTempFile;
 use rocket::http::ContentType;
+use rocket::tokio::net::UnixStream;
 use rocket::tokio::{self, fs::File, io::AsyncReadExt};
 use sqlx::sqlite::SqlitePool;
 use std::path::PathBuf;
@@ -147,9 +147,7 @@ impl SchedulerClient {
         match request_result {
             ToClientMsg::RequestResult(rr) => match rr {
                 RequestResult::Ok => Ok(()),
-                RequestResult::Err(error) => {
-                    Err(SchedulerClientError::KillFailed(error))
-                }
+                RequestResult::Err(error) => Err(SchedulerClientError::KillFailed(error)),
             },
             _ => Err(SchedulerClientError::KillFailed(
                 "unexpected query result".to_string(),

@@ -1,31 +1,20 @@
-mod common;
-mod status;
-mod jobs;
-mod tasks;
 mod batches;
+mod common;
+mod jobs;
+mod status;
+mod tasks;
 mod users;
 
-pub use crate::models::common::{
-    Model,
-    ModelError,
-    New,
-    Existing,
-};
-pub use crate::models::status::Status;
-pub use crate::models::jobs::Job;
-pub use crate::models::tasks::{
-    Task,
-    TaskCommandArgs,
-    TaskDependency,
-};
 pub use crate::models::batches::Batch;
+pub use crate::models::common::{Existing, Model, ModelError, New};
+pub use crate::models::jobs::Job;
+pub use crate::models::status::Status;
+pub use crate::models::tasks::{Task, TaskCommandArgs, TaskDependency};
 pub use crate::models::users::{create_or_update_user, User};
-
-
 
 #[cfg(test)]
 mod test {
-    use crate::models::{Batch, create_or_update_user};
+    use crate::models::{create_or_update_user, Batch};
     use crate::workflows::{WorkFlowGraph, WorkFlowTask};
     use rocket::tokio;
     use sqlx::{Connection, Executor, SqliteConnection};
@@ -73,7 +62,9 @@ mod test {
     async fn test_graph_persistence() {
         // build DB
         let mut conn = setup_in_memory_database().await.unwrap();
-        let user = create_or_update_user("user-name", "covfefe", &mut conn).await.unwrap();
+        let user = create_or_update_user("user-name", "covfefe", &mut conn)
+            .await
+            .unwrap();
         // build graph
         let graph = build_test_workflow_graph();
         assert!(graph.is_cycle_free());

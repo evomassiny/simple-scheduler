@@ -1,11 +1,10 @@
-use rocket::request::{self, Request, Outcome, FromRequest};
-use rocket::http::Status;
+use crate::models::{Existing, Model, New, User};
+use chrono::{DateTime, Duration, Utc};
 use rocket::http::Cookie;
+use rocket::http::Status;
+use rocket::request::{self, FromRequest, Outcome, Request};
 use serde::{Deserialize, Serialize};
-use crate::models::{Model,User, New, Existing};
 use sqlx::SqliteConnection;
-use chrono::{DateTime, Utc, Duration};
-
 
 pub const AUTH_COOKIE_NAME: &'static str = "Authorization";
 pub const AUTH_COOKIE_VALID_PERIOD_IN_DAYS: i64 = 1;
@@ -18,14 +17,13 @@ pub struct AuthToken {
 }
 
 impl AuthToken {
-
     pub async fn fetch_user(&self, conn: &mut SqliteConnection) -> Option<User<Existing>> {
         User::get_from_id(self.user_id, conn).await
     }
 
     fn is_still_valid(&self) -> bool {
         let now = Utc::now();
-        (self.creation + Duration::days(AUTH_COOKIE_VALID_PERIOD_IN_DAYS)) >=  now
+        (self.creation + Duration::days(AUTH_COOKIE_VALID_PERIOD_IN_DAYS)) >= now
     }
 
     pub fn new(user: User<Existing>) -> Option<Self> {
@@ -36,9 +34,11 @@ impl AuthToken {
     }
 
     pub fn as_cookie(&self) -> Cookie {
-        Cookie::new(AUTH_COOKIE_NAME, serde_json::to_string(self).unwrap_or("error".to_owned()))
+        Cookie::new(
+            AUTH_COOKIE_NAME,
+            serde_json::to_string(self).unwrap_or("error".to_owned()),
+        )
     }
-
 }
 
 #[rocket::async_trait]

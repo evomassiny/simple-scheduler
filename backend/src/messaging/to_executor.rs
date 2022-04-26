@@ -7,5 +7,8 @@ pub enum ExecutorQuery {
     Kill,
     Terminate,
     GetStatus,
-    SetHypervisorSocket(Option<PathBuf>),
+    SetHypervisorSocket(PathBuf),
+    TerminateMonitor,
+    RequestStatusNotification,
+    Ok,
 }

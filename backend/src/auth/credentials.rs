@@ -1,18 +1,14 @@
+use crate::models::{Existing, User};
 use aes::{
-    cipher::{
-        generic_array::GenericArray,
-        KeyInit,
-        BlockDecrypt, 
-    },
-    Aes128, Block, 
+    cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit},
+    Aes128, Block,
 };
 use base64;
 use jaded::{FromJava, Parser};
 use rsa::{pkcs8::FromPrivateKey, PaddingScheme, RsaPrivateKey};
+use sqlx::SqliteConnection;
 use std::io::{Error as IOError, ErrorKind};
 use std::str::FromStr;
-use crate::models::{User, Existing};
-use sqlx::SqliteConnection;
 
 #[derive(Debug, FromJava)]
 pub struct Credentials {
@@ -23,8 +19,7 @@ pub struct Credentials {
 pub const BLOCK_SIZE: usize = 16;
 
 impl Credentials {
-
-    /// Build a Credential from a base64 
+    /// Build a Credential from a base64
     /// encoded, AES encrypted str.
     /// The AES key must be stored in the data,
     /// and being decrytable using the PKCS8 RSA private key (in DER format).
@@ -45,7 +40,7 @@ impl Credentials {
             "Could not parse auth data",
         )))
     }
-    
+
     /// test user/pass credentials
     pub async fn get_user(&self, conn: &mut SqliteConnection) -> Option<User<Existing>> {
         if let Some(user) = User::get_from_name(&self.login, conn).await {
@@ -103,7 +98,6 @@ pub struct EncryptedData<'a> {
     encrypted_data: &'a [u8],
 }
 impl<'a> EncryptedData<'a> {
-
     /// Parse a bytes slice into an EncryptedData,
     /// but does not decrypt it.
     pub fn parse(bytes: &'a [u8]) -> Result<Self, Box<dyn std::error::Error>> {
@@ -141,10 +135,7 @@ impl<'a> EncryptedData<'a> {
     }
 
     /// Decrypts the aes key using an RSA PKCS8 DER private key.
-    fn decrypt_aes_key(
-        &self,
-        private_key: &[u8],
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fn decrypt_aes_key(&self, private_key: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         match self.cipher {
             CipherKind::RSA_ECB_PKCS1Padding => {
                 let rsa_private_key = RsaPrivateKey::from_pkcs8_der(private_key)?;
@@ -177,10 +168,10 @@ impl<'a> EncryptedData<'a> {
     }
 }
 
-
 #[test]
 fn test_credential() {
-    const PRIVATE_KEY: &[u8] = include_bytes!("../../test-data/authentification/private.rsa.pkcs8.der");
+    const PRIVATE_KEY: &[u8] =
+        include_bytes!("../../test-data/authentification/private.rsa.pkcs8.der");
     const AUTH_DATA: &str =
         include_str!("../../test-data/authentification/credential-java-debug.enc");
 

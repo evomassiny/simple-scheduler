@@ -1,19 +1,11 @@
-use crate::models::{
-    Model,
-    ModelError,
-    Status,
-    User,
-    Existing,
-    Task,
-};
-use chrono::{NaiveDateTime, Utc};
-use crate::sqlx::Row;
-use sqlx::sqlite::SqliteConnection;
+use crate::models::{Existing, Model, ModelError, Status, Task, User};
 use crate::rocket::futures::TryStreamExt;
+use crate::sqlx::Row;
 use async_trait::async_trait;
+use chrono::{NaiveDateTime, Utc};
+use sqlx::sqlite::SqliteConnection;
 
-
-/// The `Job` struct implements abstraction over the `jobs` SQL table, 
+/// The `Job` struct implements abstraction over the `jobs` SQL table,
 /// defined as such:
 ///
 /// ```sql
@@ -49,16 +41,17 @@ pub struct Job {
 #[async_trait]
 impl Model for Job {
     async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let _query_result =
-            sqlx::query("UPDATE jobs SET name = ?, submit_time = ?, status = ?, user = ? WHERE id = ?")
-                .bind(&self.name)
-                .bind(&self.submit_time.format("%Y-%m-%d %H:%M:%S").to_string())
-                .bind(self.status.as_u8())
-                .bind(self.user)
-                .bind(self.id.ok_or(ModelError::ModelNotFound)?)
-                .execute(conn)
-                .await
-                .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
+        let _query_result = sqlx::query(
+            "UPDATE jobs SET name = ?, submit_time = ?, status = ?, user = ? WHERE id = ?",
+        )
+        .bind(&self.name)
+        .bind(&self.submit_time.format("%Y-%m-%d %H:%M:%S").to_string())
+        .bind(self.status.as_u8())
+        .bind(self.user)
+        .bind(self.id.ok_or(ModelError::ModelNotFound)?)
+        .execute(conn)
+        .await
+        .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         Ok(())
     }
 
@@ -181,18 +174,21 @@ impl Job {
 
     /// Lookup state of all tasks composing the job, and update self.status accordingly.
     /// (commit changes in DB).
-    /// 
+    ///
     /// * If all task failed => failure
     /// * If ONE task canceled => Canceled
     /// * If ONE task Stopped => Stopped
     /// * If ONE task Killed => killed
     /// * if mix failure/succed => succeed
-    pub async fn update_state_from_task_ones(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
+    pub async fn update_state_from_task_ones(
+        &mut self,
+        conn: &mut SqliteConnection,
+    ) -> Result<(), ModelError> {
         let job_id = self.id.ok_or(ModelError::ModelNotFound)?;
 
         let tasks = Task::select_by_job(job_id, &mut *conn).await?;
 
-         for task in &tasks {
+        for task in &tasks {
             if !task.status.is_finished() {
                 // if there is remaining tasks
                 // no need to update job staus
@@ -205,18 +201,18 @@ impl Job {
                 Status::Stopped => {
                     job_status = Status::Stopped;
                     break;
-                },
+                }
                 Status::Canceled => {
                     job_status = Status::Canceled;
                     break;
-                },
+                }
                 Status::Killed => {
                     job_status = Status::Killed;
                     break;
-                },
+                }
                 Status::Succeed => {
                     job_status = Status::Succeed;
-                },
+                }
                 _ => {}
             }
         }
@@ -224,7 +220,5 @@ impl Job {
         let _ = self.update(conn).await?;
 
         Ok(())
-
     }
 }
-

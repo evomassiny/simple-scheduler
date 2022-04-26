@@ -1,10 +1,9 @@
-use std::path::Path;
-use rocket::{Build, Rocket};
-use crate::scheduling::SchedulerServer;
+use crate::auth::{login, KeyPair};
 use crate::config::Config;
-use crate::auth::{KeyPair, login};
 use crate::rest;
-
+use crate::scheduling::SchedulerServer;
+use rocket::{Build, Rocket};
+use std::path::Path;
 
 /// Start Scheduler hypervisor service
 /// and Web server.
@@ -12,7 +11,10 @@ use crate::rest;
 pub async fn run_server(rocket: Rocket<Build>, config: &Config) -> Result<(), &'static str> {
     // launch process update listener loop
     let socket_path = Path::new(&config.hypervisor_socket_path).to_path_buf();
-    let pool = config.database_pool().await.or(Err("Failed to build pool."))?;
+    let pool = config
+        .database_pool()
+        .await
+        .or(Err("Failed to build pool."))?;
     let scheduler_server = SchedulerServer::new(socket_path, pool);
     let scheduler_client = scheduler_server.client();
     scheduler_server.start();
@@ -27,17 +29,10 @@ pub async fn run_server(rocket: Rocket<Build>, config: &Config) -> Result<(), &'
         .manage(key_pair)
         .mount(
             "/rest/scheduler/",
-            routes![
-                rest::job_status,
-                rest::submit_job,
-                rest::kill_job,
-                login
-            ],
+            routes![rest::job_status, rest::submit_job, rest::kill_job, login],
         )
         .launch()
         .await
         .or(Err("Server failed."))?;
     Ok(())
 }
-
-

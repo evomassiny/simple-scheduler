@@ -10,4 +10,3 @@ pub enum RequestResult {
 pub enum ToClientMsg {
     RequestResult(RequestResult),
 }
-
