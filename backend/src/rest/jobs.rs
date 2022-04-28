@@ -28,12 +28,12 @@ pub async fn submit_job(
     mut uploaded_file: Form<WorkflowForm<'_>>,
 ) -> Result<JsonValue, Custom<String>> {
     let scheduler = scheduler.inner();
-    let mut conn = scheduler
-        .pool
+    let mut read_conn = scheduler
+        .read_pool
         .acquire()
         .await
         .map_err(|e| Custom(HttpStatus::InternalServerError, e.to_string()))?;
-    let user = auth.fetch_user(&mut conn).await.ok_or(Custom(
+    let user = auth.fetch_user(&mut read_conn).await.ok_or(Custom(
         HttpStatus::InternalServerError,
         "unknown user".to_string(),
     ))?;
@@ -58,13 +58,13 @@ pub async fn job_status(
 ) -> Result<JsonValue, NotFound<String>> {
     let scheduler = scheduler.inner();
 
-    let mut conn = scheduler
-        .pool
+    let mut read_conn = scheduler
+        .read_pool
         .acquire()
         .await
         .map_err(|e| NotFound(e.to_string()))?;
 
-    let status: String = Job::get_job_status_by_id(job_id, &mut conn)
+    let status: String = Job::get_job_status_by_id(job_id, &mut read_conn)
         .await
         .map_err(|e| NotFound(e.to_string()))?
         .as_proactive_string();
@@ -80,7 +80,7 @@ pub async fn job_status(
     .bind(Status::Pending.as_u8())
     .bind(Status::Running.as_u8())
     .bind(&job_id)
-    .fetch_one(&mut conn)
+    .fetch_one(&mut read_conn)
     .await
     .map_err(|e| NotFound(e.to_string()))?;
 
@@ -100,7 +100,7 @@ pub async fn job_status(
     // fetch status for each tasks
     let mut rows = sqlx::query("SELECT name, status FROM tasks WHERE job = ?")
         .bind(&job_id)
-        .fetch(&mut conn);
+        .fetch(&mut read_conn);
     let mut task_details: HashMap<String, JsonValue> = HashMap::new();
 
     while let Some(row) = rows.try_next().await.map_err(|e| NotFound(e.to_string()))? {

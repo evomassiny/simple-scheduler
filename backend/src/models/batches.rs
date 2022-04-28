@@ -3,6 +3,7 @@ use crate::models::{
 };
 use crate::workflows::WorkFlowGraph;
 use sqlx::sqlite::SqliteConnection;
+use sqlx::Connection;
 use std::collections::HashMap;
 
 /// A `Batch` is a graph of task to be executed.
@@ -21,6 +22,7 @@ pub struct Batch {
 }
 
 impl Batch {
+    /// Create a graph (job + tasks + dependencies) in one DB transaction.
     pub async fn from_graph(
         workflow: &WorkFlowGraph,
         user: &User<Existing>,
@@ -34,9 +36,13 @@ impl Batch {
             return Err(ModelError::DependencyCycle);
         }
 
+        let mut transaction = conn
+            .begin()
+            .await
+            .map_err(|e| ModelError::DbError(e.to_string()))?;
         // Create and save Job
         let mut job = Job::new(&workflow.name, user);
-        let _ = job.save(conn).await?;
+        let _ = job.save(&mut transaction).await?;
         let job_id: i64 = job.id.ok_or(ModelError::ModelNotFound)?;
 
         // create and save all tasks
@@ -53,7 +59,7 @@ impl Batch {
                 stdout: None,
                 stderr: None,
             };
-            let _ = task.save(conn).await?;
+            let _ = task.save(&mut transaction).await?;
             tasks.push(task);
         }
 
@@ -69,10 +75,14 @@ impl Batch {
                     parent,
                     job: job_id,
                 };
-                let _ = dependency.save(conn).await?;
+                let _ = dependency.save(&mut transaction).await?;
                 dependencies.push(dependency);
             }
         }
+        let _ = transaction
+            .commit()
+            .await
+            .map_err(|e| ModelError::DbError(e.to_string()))?;
         Ok(Self {
             job,
             tasks,

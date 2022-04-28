@@ -12,14 +12,26 @@ pub struct Config {
 }
 
 impl Config {
-    pub async fn database_pool(&self) -> Result<SqlitePool, String> {
+    pub async fn database_read_pool(&self) -> Result<SqlitePool, String> {
         // Build database connection pool
         let pool = SqlitePoolOptions::new()
             .min_connections(16)
-            .max_connections(64)
+            .max_connections(16)
             .connect(&self.database_url)
             .await
             .map_err(|e| format!("failed to get database pool: {:?}", e))?;
+
+        Ok(pool)
+    }
+    pub async fn database_write_pool(&self) -> Result<SqlitePool, String> {
+        // Build database connection pool
+        let pool = SqlitePoolOptions::new()
+            .min_connections(1)
+            .max_connections(1)
+            .connect(&self.database_url)
+            .await
+            .map_err(|e| format!("failed to get database pool: {:?}", e))?;
+
         Ok(pool)
     }
 

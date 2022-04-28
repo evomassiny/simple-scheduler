@@ -29,7 +29,8 @@ impl std::error::Error for SchedulerClientError {}
 pub struct SchedulerClient {
     /// absolute path to the UNIX socket the hypervisor is listening on
     pub socket: PathBuf,
-    pub pool: SqlitePool,
+    pub read_pool: SqlitePool,
+    pub write_pool: SqlitePool,
 }
 
 impl SchedulerClient {
@@ -45,12 +46,12 @@ impl SchedulerClient {
         workflow_xml: &str,
         user: &User<Existing>,
     ) -> Result<i64, Box<dyn std::error::Error>> {
-        let mut conn = self.pool.acquire().await?;
+        let mut write_conn = self.write_pool.acquire().await?;
         // parse as workflow
         let graph: WorkFlowGraph = WorkFlowGraph::from_str(workflow_xml)?;
 
         // Save to DB
-        let batch = Batch::from_graph(&graph, &user, &mut conn).await?;
+        let batch = Batch::from_graph(&graph, &user, &mut write_conn).await?;
 
         // warn hypervisor that new jobs are available
         let mut to_hypervisor = self.connect_to_scheduler().await?;

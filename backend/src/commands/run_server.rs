@@ -11,11 +11,18 @@ use std::path::Path;
 pub async fn run_server(rocket: Rocket<Build>, config: &Config) -> Result<(), &'static str> {
     // launch process update listener loop
     let socket_path = Path::new(&config.hypervisor_socket_path).to_path_buf();
-    let pool = config
-        .database_pool()
+
+    let read_pool = config
+        .database_read_pool()
         .await
-        .or(Err("Failed to build pool."))?;
-    let scheduler_server = SchedulerServer::new(socket_path, pool);
+        .or(Err("Failed to build read pool."))?;
+
+    let write_pool = config
+        .database_write_pool()
+        .await
+        .or(Err("Failed to build write pool."))?;
+
+    let scheduler_server = SchedulerServer::new(socket_path, read_pool, write_pool);
     let scheduler_client = scheduler_server.client();
     scheduler_server.start();
 

@@ -9,7 +9,7 @@ pub use crate::models::batches::Batch;
 pub use crate::models::common::{Existing, Model, ModelError, New};
 pub use crate::models::jobs::Job;
 pub use crate::models::status::Status;
-pub use crate::models::tasks::{Task, TaskCommandArgs, TaskDependency};
+pub use crate::models::tasks::{Task, TaskCommandArgs, TaskDependency, TaskView};
 pub use crate::models::users::{create_or_update_user, User};
 
 #[cfg(test)]

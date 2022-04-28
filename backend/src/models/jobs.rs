@@ -180,24 +180,23 @@ impl Job {
     /// * If ONE task Stopped => Stopped
     /// * If ONE task Killed => killed
     /// * if mix failure/succed => succeed
-    pub async fn update_state_from_task_ones(
-        &mut self,
-        conn: &mut SqliteConnection,
+    pub async fn update_job_state_from_task_ones(
+        read_conn: &mut SqliteConnection,
+        write_conn: &mut SqliteConnection,
+        job_id: i64,
     ) -> Result<(), ModelError> {
-        let job_id = self.id.ok_or(ModelError::ModelNotFound)?;
+        let task_statuses = Task::select_statuses_by_job(job_id, &mut *read_conn).await?;
 
-        let tasks = Task::select_by_job(job_id, &mut *conn).await?;
-
-        for task in &tasks {
-            if !task.status.is_finished() {
+        for status in &task_statuses {
+            if !status.is_finished() {
                 // if there is remaining tasks
                 // no need to update job staus
                 return Ok(());
             }
         }
         let mut job_status = Status::Failed;
-        for task in &tasks {
-            match task.status {
+        for status in &task_statuses {
+            match status {
                 Status::Stopped => {
                     job_status = Status::Stopped;
                     break;
@@ -216,9 +215,12 @@ impl Job {
                 _ => {}
             }
         }
-        self.status = job_status;
-        let _ = self.update(conn).await?;
-
+        let _query_result = sqlx::query("UPDATE jobs SET status = ? WHERE id = ?")
+            .bind(&job_status.as_u8())
+            .bind(&job_id)
+            .execute(&mut *write_conn)
+            .await
+            .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         Ok(())
     }
 }
