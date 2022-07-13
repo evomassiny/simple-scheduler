@@ -1,4 +1,4 @@
-use crate::models::{Existing, User};
+use crate::models::{UserId, User};
 use aes::{
     cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit},
     Aes128, Block,
@@ -42,7 +42,7 @@ impl Credentials {
     }
 
     /// test user/pass credentials
-    pub async fn get_user(&self, conn: &mut SqliteConnection) -> Option<User<Existing>> {
+    pub async fn get_user(&self, conn: &mut SqliteConnection) -> Option<User<UserId>> {
         if let Some(user) = User::get_from_name(&self.login, conn).await {
             return match user.verify_password(&self.pass) {
                 Ok(true) => Some(user),

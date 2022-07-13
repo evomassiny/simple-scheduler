@@ -1,4 +1,4 @@
-use crate::models::{Existing, Model, New, User};
+use crate::models::{UserId, User};
 use chrono::{DateTime, Duration, Utc};
 use rocket::http::Cookie;
 use rocket::http::Status;
@@ -17,7 +17,7 @@ pub struct AuthToken {
 }
 
 impl AuthToken {
-    pub async fn fetch_user(&self, conn: &mut SqliteConnection) -> Option<User<Existing>> {
+    pub async fn fetch_user(&self, conn: &mut SqliteConnection) -> Option<User<UserId>> {
         User::get_from_id(self.user_id, conn).await
     }
 
@@ -26,9 +26,9 @@ impl AuthToken {
         (self.creation + Duration::days(AUTH_COOKIE_VALID_PERIOD_IN_DAYS)) >= now
     }
 
-    pub fn new(user: User<Existing>) -> Option<Self> {
+    pub fn new(user: User<UserId>) -> Option<Self> {
         Some(Self {
-            user_id: user.state.id,
+            user_id: user.id,
             creation: Utc::now(),
         })
     }

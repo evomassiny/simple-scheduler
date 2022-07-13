@@ -1,9 +1,13 @@
-use crate::models::{Existing, Model, ModelError, Status, Task, User};
+use crate::models::{ModelError, Status, Task, User, UserId};
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
-use async_trait::async_trait;
 use chrono::{NaiveDateTime, Utc};
 use sqlx::sqlite::SqliteConnection;
+
+/// A newly created Jobn not save in db
+pub struct NewJob;
+/// Id of an existing record in db
+pub type JobId = i64;
 
 /// The `Job` struct implements abstraction over the `jobs` SQL table,
 /// defined as such:
@@ -23,11 +27,10 @@ use sqlx::sqlite::SqliteConnection;
 /// the `job.id` primary key is used to group the `tasks` and `task_dependencies` sql table,
 /// and their related `crate::models::Task` and `crate::models::TaskDependancy` models.
 ///
-/// It implements the `crate::model::Model` trait.
 #[derive(Debug, Clone)]
-pub struct Job {
+pub struct Job<Id> {
     /// Id of a job
-    pub id: Option<i64>,
+    pub id: Id,
     /// name of the job
     pub name: String,
     /// When the user submitted it
@@ -35,27 +38,25 @@ pub struct Job {
     /// completion status
     pub status: Status,
     /// ID of the user that submitted the job
-    pub user: i64,
+    pub user: UserId,
 }
 
-#[async_trait]
-impl Model for Job {
-    async fn update(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let _query_result = sqlx::query(
-            "UPDATE jobs SET name = ?, submit_time = ?, status = ?, user = ? WHERE id = ?",
-        )
-        .bind(&self.name)
-        .bind(&self.submit_time.format("%Y-%m-%d %H:%M:%S").to_string())
-        .bind(self.status.as_u8())
-        .bind(self.user)
-        .bind(self.id.ok_or(ModelError::ModelNotFound)?)
-        .execute(conn)
-        .await
-        .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
-        Ok(())
+impl Job<NewJob> {
+    
+    /// Build a pending Job, use the current time
+    /// as `submit_time`.
+    /// The returned instance is not saved in the database.
+    pub fn new(name: &str, user: UserId) -> Self {
+        Job {
+            id: NewJob,
+            name: name.to_string(),
+            submit_time: NaiveDateTime::from_timestamp(Utc::now().timestamp(), 0),
+            status: Status::Pending,
+            user,
+        }
     }
 
-    async fn create(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
+    pub async fn save(self, conn: &mut SqliteConnection) -> Result<Job<JobId>, ModelError> {
         let query_result =
             sqlx::query("INSERT INTO jobs (name, submit_time, status, user) VALUES (?, ?, ?, ?)")
                 .bind(&self.name)
@@ -65,28 +66,33 @@ impl Model for Job {
                 .execute(conn)
                 .await
                 .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
-        let id = query_result.last_insert_rowid();
-        self.id = Some(id);
-        Ok(())
-    }
-
-    fn id(&self) -> Option<i64> {
-        self.id
+        let id: JobId = query_result.last_insert_rowid();
+        let job = Job {
+            id,
+            name: self.name,
+            submit_time: self.submit_time,
+            status: self.status,
+            user: self.user,
+        };
+        Ok(job)
     }
 }
 
-impl Job {
-    /// Build a pending Job, use the current time
-    /// as `submit_time`.
-    /// The returned instance is not saved in the database.
-    pub fn new(name: &str, user: &User<Existing>) -> Self {
-        Job {
-            id: None,
-            name: name.to_string(),
-            submit_time: NaiveDateTime::from_timestamp(Utc::now().timestamp(), 0),
-            status: Status::Pending,
-            user: user.state.id,
-        }
+impl Job<JobId> {
+
+    pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
+        let _query_result = sqlx::query(
+            "UPDATE jobs SET name = ?, submit_time = ?, status = ?, user = ? WHERE id = ?",
+        )
+        .bind(&self.name)
+        .bind(&self.submit_time.format("%Y-%m-%d %H:%M:%S").to_string())
+        .bind(self.status.as_u8())
+        .bind(self.user)
+        .bind(self.id)
+        .execute(conn)
+        .await
+        .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
+        Ok(())
     }
 
     /// query database and return all jobs with a status set to `status`
@@ -126,7 +132,7 @@ impl Job {
     }
 
     /// Select a Job by its id
-    pub async fn get_by_id(id: i64, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
+    pub async fn get_by_id(id: JobId, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
         let row = sqlx::query("SELECT id, name, status, submit_time, user FROM jobs WHERE id = ?")
             .bind(&id)
             .fetch_one(conn)
@@ -156,11 +162,11 @@ impl Job {
     }
 
     pub async fn get_job_status_by_id(
-        id: i64,
+        id: JobId,
         conn: &mut SqliteConnection,
     ) -> Result<Status, ModelError> {
         let row = sqlx::query("SELECT status FROM jobs WHERE id = ?")
-            .bind(&id)
+            .bind(id)
             .fetch_one(conn)
             .await
             .map_err(|_| ModelError::ModelNotFound)?;
@@ -183,7 +189,7 @@ impl Job {
     pub async fn update_job_state_from_task_ones(
         read_conn: &mut SqliteConnection,
         write_conn: &mut SqliteConnection,
-        job_id: i64,
+        job_id: JobId,
     ) -> Result<(), ModelError> {
         let task_statuses = Task::select_statuses_by_job(job_id, &mut *read_conn).await?;
 

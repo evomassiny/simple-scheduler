@@ -1,9 +1,14 @@
-use crate::models::{Existing, Model, ModelError, New};
+use crate::models::ModelError;
 use scrypt::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Scrypt,
 };
 use sqlx::SqliteConnection;
+
+/// Newly created user, (not in database)
+pub struct NewUser;
+/// Id of an existing User in the `users` table
+pub type UserId = i64;
 
 /// Abstraction over the `users` SQl table, defined as such:
 /// ```sql
@@ -16,7 +21,7 @@ use sqlx::SqliteConnection;
 ///
 /// This table stores the name and password hash (+salt) of a user.
 #[derive(Debug)]
-pub struct User<State> {
+pub struct User<Id> {
     /// User name
     pub name: String,
     /// PHC string, contains
@@ -25,16 +30,16 @@ pub struct User<State> {
     /// * hashed password
     pub password_hash: String,
     /// database index, or None if unsaved.
-    pub state: State,
+    pub id: Id,
 }
 
 impl<T> User<T> {
     /// Create a new User struct (hash the provided password)
-    pub fn new(name: &str, password: &str) -> Result<User<New>, String> {
+    pub fn new(name: &str, password: &str) -> Result<User<NewUser>, String> {
         Ok(User {
             name: name.to_owned(),
             password_hash: build_password_hash(password)?,
-            state: New,
+            id: NewUser,
         })
     }
 
@@ -48,8 +53,8 @@ impl<T> User<T> {
     }
 }
 
-impl User<New> {
-    pub async fn create(self, conn: &mut SqliteConnection) -> Result<User<Existing>, ModelError> {
+impl User<NewUser> {
+    pub async fn create(self, conn: &mut SqliteConnection) -> Result<User<UserId>, ModelError> {
         let query_result = sqlx::query(
             "INSERT INTO users (name, password_hash) \
             VALUES (?, ?)",
@@ -59,18 +64,18 @@ impl User<New> {
         .execute(conn)
         .await
         .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
-        let id = query_result.last_insert_rowid();
+        let user_id: UserId = query_result.last_insert_rowid();
         Ok(User {
             name: self.name,
             password_hash: self.password_hash,
-            state: Existing { id },
+            id: user_id,
         })
     }
 }
 
-impl User<Existing> {
+impl User<UserId> {
     pub async fn get_from_name(name: &str, conn: &mut SqliteConnection) -> Option<Self> {
-        let row: (i64, String) =
+        let row: (UserId, String) =
             sqlx::query_as("SELECT id, password_hash FROM users WHERE name = ?")
                 .bind(&name)
                 .fetch_one(conn)
@@ -80,14 +85,14 @@ impl User<Existing> {
         Some(User {
             name: name.to_owned(),
             password_hash: row.1,
-            state: Existing { id: row.0 },
+            id: row.0,
         })
     }
 
-    pub async fn get_from_id(id: i64, conn: &mut SqliteConnection) -> Option<Self> {
+    pub async fn get_from_id(user_id: UserId, conn: &mut SqliteConnection) -> Option<Self> {
         let row: (String, String) =
             sqlx::query_as("SELECT name, password_hash FROM users WHERE id = ?")
-                .bind(id)
+                .bind(user_id)
                 .fetch_one(conn)
                 .await
                 .ok()?;
@@ -95,7 +100,7 @@ impl User<Existing> {
         Some(User {
             name: row.0,
             password_hash: row.1,
-            state: Existing { id },
+            id: user_id,
         })
     }
 
@@ -106,7 +111,7 @@ impl User<Existing> {
         )
         .bind(&self.name)
         .bind(&self.password_hash)
-        .bind(&self.state.id)
+        .bind(&self.id)
         .execute(conn)
         .await
         .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
@@ -128,8 +133,8 @@ pub async fn create_or_update_user(
     name: &str,
     password: &str,
     conn: &mut SqliteConnection,
-) -> Result<User<Existing>, String> {
-    match User::<Existing>::get_from_name(&name, &mut *conn).await {
+) -> Result<User<UserId>, String> {
+    match User::<UserId>::get_from_name(&name, &mut *conn).await {
         Some(mut user) => {
             user.password_hash = build_password_hash(&password)
                 .map_err(|e| format!("Failed to hash new password {:?}", e))?;
@@ -140,7 +145,7 @@ pub async fn create_or_update_user(
             Ok(user)
         }
         None => {
-            let new_user = User::<New>::new(&name, &password)
+            let new_user = User::<NewUser>::new(&name, &password)
                 .map_err(|e| format!("failed to build user object: {:?}", e))?;
             let user = new_user
                 .create(&mut *conn)
@@ -153,14 +158,14 @@ pub async fn create_or_update_user(
 
 #[cfg(test)]
 mod tests {
-    use crate::models::{New, User};
+    use crate::models::{NewUser, User};
     use rocket::tokio;
     use sqlx::{Connection, Executor, SqliteConnection};
 
     #[test]
     fn test_password_verification() {
         let user =
-            User::<New>::new("debug-user", "debug-password").expect("Failed to build User struct");
+            User::<NewUser>::new("debug-user", "debug-password").expect("Failed to build User struct");
 
         assert_eq!(user.verify_password("debug-password"), Ok(true));
         assert_eq!(user.verify_password("not-good-password"), Ok(false));
@@ -176,7 +181,7 @@ mod tests {
             .await
             .expect("Could not build test database.");
 
-        let new_user = User::<New>::new("debug-user", "debug-password").unwrap();
+        let new_user = User::<NewUser>::new("debug-user", "debug-password").unwrap();
 
         let user = new_user.create(&mut conn).await.unwrap();
 
@@ -185,6 +190,6 @@ mod tests {
             .expect("Could not fetch User struct");
         assert_eq!(user.verify_password("debug-password"), Ok(true));
         assert_eq!(same_user.verify_password("debug-password"), Ok(true));
-        assert_eq!(same_user.state.id, user.state.id);
+        assert_eq!(same_user.id, user.id);
     }
 }

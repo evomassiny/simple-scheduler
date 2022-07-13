@@ -1,5 +1,5 @@
 use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
-use crate::models::{Batch, Existing, ModelError, User};
+use crate::models::{Batch, ModelError, User, UserId, JobId};
 use crate::workflows::WorkFlowGraph;
 use rocket::fs::TempFile as RocketTempFile;
 use rocket::http::ContentType;
@@ -44,14 +44,14 @@ impl SchedulerClient {
     pub async fn submit_workflow(
         &self,
         workflow_xml: &str,
-        user: &User<Existing>,
-    ) -> Result<i64, Box<dyn std::error::Error>> {
+        user: &User<UserId>,
+    ) -> Result<JobId, Box<dyn std::error::Error>> {
         let mut write_conn = self.write_pool.acquire().await?;
         // parse as workflow
         let graph: WorkFlowGraph = WorkFlowGraph::from_str(workflow_xml)?;
 
         // Save to DB
-        let batch = Batch::from_graph(&graph, &user, &mut write_conn).await?;
+        let batch = Batch::from_graph(&graph, user.id, &mut write_conn).await?;
 
         // warn hypervisor that new jobs are available
         let mut to_hypervisor = self.connect_to_scheduler().await?;
@@ -60,15 +60,14 @@ impl SchedulerClient {
             .await?;
 
         // return job id
-        let job_id = batch.job.id.ok_or(ModelError::ModelNotFound)?;
-        Ok(job_id)
+        Ok(batch.job.id)
     }
 
     /// parse a workflow file from uploaded data, then submit it
     pub async fn submit_from_tempfile(
         &self,
         uploaded_file: &mut RocketTempFile<'_>,
-        user: &User<Existing>,
+        user: &User<UserId>,
     ) -> Result<i64, Box<dyn std::error::Error>> {
         // first persist the file
         // * use a NamedtempFile to get a free path

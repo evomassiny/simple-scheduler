@@ -6,11 +6,18 @@ mod tasks;
 mod users;
 
 pub use crate::models::batches::Batch;
-pub use crate::models::common::{Existing, Model, ModelError, New};
-pub use crate::models::jobs::Job;
+pub use crate::models::common::{Model, ModelError};
+pub use crate::models::jobs::{Job, NewJob, JobId};
 pub use crate::models::status::Status;
-pub use crate::models::tasks::{Task, TaskCommandArgs, TaskDependency, TaskView};
-pub use crate::models::users::{create_or_update_user, User};
+pub use crate::models::tasks::{
+    Task, NewTask, TaskId, TaskView,
+    TaskCommandArgs,
+    TaskDependency, NewTaskDep, TaskDepId,
+};
+pub use crate::models::users::{
+    create_or_update_user, 
+    User, NewUser, UserId,
+};
 
 #[cfg(test)]
 mod test {
@@ -71,7 +78,7 @@ mod test {
         assert!(graph.are_task_names_unique());
 
         // test batch creation
-        let batch = Batch::from_graph(&graph, &user, &mut conn)
+        let batch = Batch::from_graph(&graph, user.id, &mut conn)
             .await
             .expect("Failed to build Batch");
         assert_eq!(&batch.job.name, "test-job");

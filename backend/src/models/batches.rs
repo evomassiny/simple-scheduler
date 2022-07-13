@@ -1,5 +1,6 @@
 use crate::models::{
-    Existing, Job, Model, ModelError, Status, Task, TaskCommandArgs, TaskDependency, User,
+    Job, JobId, ModelError, NewJob, NewTask, NewTaskDep, Status, Task,
+    TaskCommandArgs, TaskDependency, TaskDepId, TaskId, UserId,
 };
 use crate::workflows::WorkFlowGraph;
 use sqlx::sqlite::SqliteConnection;
@@ -14,18 +15,18 @@ use std::collections::HashMap;
 /// constraints of the whole batch execution.
 #[derive(Debug)]
 pub struct Batch {
-    pub job: Job,
+    pub job: Job<JobId>,
     /// One task == one bash command to execute == one node in the execution graph
-    pub tasks: Vec<Task>,
+    pub tasks: Vec<Task<TaskId>>,
     /// execution graph edge
-    pub dependencies: Vec<TaskDependency>,
+    pub dependencies: Vec<TaskDependency<TaskDepId>>,
 }
 
 impl Batch {
     /// Create a graph (job + tasks + dependencies) in one DB transaction.
     pub async fn from_graph(
         workflow: &WorkFlowGraph,
-        user: &User<Existing>,
+        user: UserId,
         conn: &mut SqliteConnection,
     ) -> Result<Self, ModelError> {
         // validate input
@@ -41,41 +42,48 @@ impl Batch {
             .await
             .map_err(|e| ModelError::DbError(e.to_string()))?;
         // Create and save Job
-        let mut job = Job::new(&workflow.name, user);
-        let _ = job.save(&mut transaction).await?;
-        let job_id: i64 = job.id.ok_or(ModelError::ModelNotFound)?;
+        let job = Job::<NewJob>::new(&workflow.name, user)
+            .save(&mut transaction)
+            .await?;
 
         // create and save all tasks
-        let mut tasks: Vec<Task> = Vec::new();
+        let mut tasks: Vec<Task<TaskId>> = Vec::new();
         for graph_task in &workflow.tasks {
-            let mut task = Task {
-                id: None,
+            let task = Task {
+                id: NewTask,
                 name: graph_task.name.clone(),
                 status: Status::Pending,
                 last_update_version: None,
                 handle: "".to_string(),
-                command_args: TaskCommandArgs::from_strings(graph_task.commands()),
-                job: job_id,
+                job: job.id,
                 stdout: None,
                 stderr: None,
-            };
-            let _ = task.save(&mut transaction).await?;
+            }
+            .save(&mut transaction)
+            .await?;
+
+            // save each of their individual command line args
+            let command_args = TaskCommandArgs::from_strings(graph_task.commands(), task.id);
+            for cmd_arg in command_args {
+                cmd_arg.save(&mut transaction).await?;
+            }
             tasks.push(task);
         }
 
         // create and save TaskDependency
-        let mut dependencies: Vec<TaskDependency> = Vec::new();
+        let mut dependencies: Vec<TaskDependency<TaskDepId>> = Vec::new();
         for (task_idx, deps_ids) in workflow.dependency_indices.iter().enumerate() {
-            let child: i64 = tasks[task_idx].id().ok_or(ModelError::ModelNotFound)?;
+            let child: TaskId = tasks[task_idx].id;
             for dep_idx in deps_ids {
-                let parent: i64 = tasks[*dep_idx].id().ok_or(ModelError::ModelNotFound)?;
-                let mut dependency = TaskDependency {
-                    id: None,
+                let parent: TaskId = tasks[*dep_idx].id;
+                let dependency = TaskDependency {
+                    id: NewTaskDep,
                     child,
                     parent,
-                    job: job_id,
-                };
-                let _ = dependency.save(&mut transaction).await?;
+                    job: job.id,
+                }
+                .save(&mut transaction)
+                .await?;
                 dependencies.push(dependency);
             }
         }
@@ -84,17 +92,19 @@ impl Batch {
             .await
             .map_err(|e| ModelError::DbError(e.to_string()))?;
         Ok(Self {
-            job,
+            job: job,
             tasks,
             dependencies,
         })
     }
 
-    pub async fn from_job(job: Job, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
+    pub async fn from_job(
+        job: Job<JobId>,
+        conn: &mut SqliteConnection,
+    ) -> Result<Self, ModelError> {
         // select tasks by job id
-        let tasks = Task::select_by_job(job.id.ok_or(ModelError::ModelNotFound)?, conn).await?;
-        let dependencies =
-            TaskDependency::select_by_job(job.id.ok_or(ModelError::ModelNotFound)?, conn).await?;
+        let tasks = Task::select_by_job(job.id, conn).await?;
+        let dependencies = TaskDependency::select_by_job(job.id, conn).await?;
         Ok(Self {
             job,
             tasks,
@@ -102,14 +112,16 @@ impl Batch {
         })
     }
 
-    pub async fn next_ready_task<'a, 'b>(&'a mut self) -> Result<Option<&'b mut Task>, ModelError>
+    pub async fn next_ready_task<'a, 'b>(
+        &'a mut self,
+    ) -> Result<Option<&'b mut Task<TaskId>>, ModelError>
     where
         'a: 'b,
     {
         // build task index
         let mut task_index: HashMap<i64, usize> = HashMap::new();
         for (idx, task) in self.tasks.iter().enumerate() {
-            task_index.insert(task.id.ok_or(ModelError::ModelNotFound)?, idx);
+            task_index.insert(task.id, idx);
         }
         // build task dependencies index
         let mut dependencies_index: HashMap<i64, Vec<i64>> = HashMap::new();
@@ -130,9 +142,8 @@ impl Batch {
             if !task.status.is_pending() {
                 continue 'ready_task_lookup;
             }
-            let task_id = task.id.ok_or(ModelError::InvalidTaskId)?;
             // iter dependencies
-            if let Some(parent_ids) = dependencies_index.get(&task_id) {
+            if let Some(parent_ids) = dependencies_index.get(&task.id) {
                 for parent_id in parent_ids {
                     let parent_idx = task_index.get(parent_id).ok_or(ModelError::InvalidTaskId)?;
                     let parent = &self.tasks[*parent_idx];

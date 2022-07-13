@@ -1,5 +1,4 @@
 use crate::messaging::{AsyncSendable, RequestResult, TaskStatus, ToClientMsg, ToSchedulerMsg};
-use crate::models::Model;
 use crate::models::{Batch, Job, Status, Task, TaskView};
 use crate::tasks::TaskHandle;
 use rocket::tokio::io::AsyncWriteExt;
@@ -14,17 +13,6 @@ use std::error::Error;
 use std::path::PathBuf;
 
 pub use crate::scheduling::client::SchedulerClient;
-
-#[derive(Debug)]
-pub enum SchedulerServerError {
-    NoSuchTask,
-}
-impl std::fmt::Display for SchedulerServerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SchedulerServerError {:?}", &self)
-    }
-}
-impl std::error::Error for SchedulerServerError {}
 
 /// Messages sent to the Work Queue updater
 #[derive(Debug)]
@@ -84,14 +72,14 @@ impl SchedulerServer {
                 }
                 if let Some(task) = batch.next_ready_task().await? {
                     // submit task
-                    let task_id = task.id.ok_or(SchedulerServerError::NoSuchTask)?;
                     let commands: Vec<String> = task
-                        .command_args
+                        .command_args(&mut read_conn)
+                        .await?
                         .iter()
                         .map(|arg| arg.argument.clone())
                         .collect();
                     let handle =
-                        TaskHandle::spawn(commands, task_id, Some(self.socket.clone())).await?;
+                        TaskHandle::spawn(commands, task.id, Some(self.socket.clone())).await?;
                     // update task
                     task.handle = handle.handle_string();
                     task.status = Status::Running;
@@ -99,7 +87,7 @@ impl SchedulerServer {
                     let _ = {
                         let mut write_conn = self.write_pool.acquire().await?;
                         Task::update_status_and_handle(
-                            task_id,
+                            task.id,
                             &task.status,
                             &task.handle,
                             &mut write_conn,
@@ -109,7 +97,7 @@ impl SchedulerServer {
                     batch.job.status = Status::Running;
                     let _ = {
                         let mut write_conn = self.write_pool.acquire().await?;
-                        batch.job.update(&mut write_conn).await?
+                        batch.job.save(&mut write_conn).await?
                     };
                     // start task
                     let _ = handle.start().await?;
@@ -172,7 +160,7 @@ impl SchedulerServer {
                     .acquire()
                     .await
                     .map_err(|e| format!("acquiring write_pool 2 {:?}", e))?;
-                task.update(&mut write_conn).await?
+                task.save(&mut write_conn).await?
             };
             // Ask monitor to clean-up file system and quit
             if let Err(error) = task_handle.terminate_monitor().await {
@@ -272,7 +260,7 @@ impl SchedulerServer {
         job.status = Status::Killed;
         let _ = {
             let mut write_conn = self.write_pool.acquire().await?;
-            job.update(&mut write_conn).await?
+            job.save(&mut write_conn).await?
         };
 
         // iter all job task,
@@ -290,7 +278,7 @@ impl SchedulerServer {
                 Status::Pending => {
                     task.status = Status::Canceled;
                     let mut write_conn = self.write_pool.acquire().await?;
-                    task.update(&mut write_conn).await?;
+                    task.save(&mut write_conn).await?;
                 }
                 _ => continue,
             }
