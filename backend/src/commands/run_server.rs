@@ -22,7 +22,8 @@ pub async fn run_server(rocket: Rocket<Build>, config: &Config) -> Result<(), &'
         .await
         .or(Err("Failed to build write pool."))?;
 
-    let scheduler_server = SchedulerServer::new(socket_path, read_pool, write_pool);
+    let scheduler_server =
+        SchedulerServer::new(socket_path, read_pool, write_pool, config.nb_of_workers);
     let scheduler_client = scheduler_server.client();
     scheduler_server.start();
 

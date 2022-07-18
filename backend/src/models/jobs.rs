@@ -42,7 +42,6 @@ pub struct Job<Id> {
 }
 
 impl Job<NewJob> {
-    
     /// Build a pending Job, use the current time
     /// as `submit_time`.
     /// The returned instance is not saved in the database.
@@ -79,7 +78,6 @@ impl Job<NewJob> {
 }
 
 impl Job<JobId> {
-
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(
             "UPDATE jobs SET name = ?, submit_time = ?, status = ?, user = ? WHERE id = ?",
@@ -228,5 +226,14 @@ impl Job<JobId> {
             .await
             .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         Ok(())
+    }
+
+    pub async fn task_count(&self, read_conn: &mut SqliteConnection) -> Result<usize, ModelError> {
+        let (count,): (u32,) = sqlx::query_as("SELECT COUNT(id) FROM tasks WHERE job = ?")
+            .bind(self.id)
+            .fetch_one(read_conn)
+            .await
+            .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
+        Ok(count as usize)
     }
 }

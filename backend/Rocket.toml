@@ -2,6 +2,7 @@
 address = "127.0.0.1"
 limits = { forms = "64 kB", json = "100 MiB" }
 port = 8000
+nb_of_workers = 5
 
 [debug]
 database_url = "sqlite:database.sqlite" 
@@ -20,3 +21,4 @@ process_directory = "./processes"
 hypervisor_socket_path = "/tmp/simple-scheduler.sock"
 private_key_path = "./prod-keys/priv.key"
 public_key_path = "./prod-keys/pub.key"
+nb_of_workers = 48

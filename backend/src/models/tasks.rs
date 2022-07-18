@@ -1,5 +1,5 @@
 use crate::messaging::TaskStatus;
-use crate::models::{ModelError, Status, JobId};
+use crate::models::{JobId, ModelError, Status};
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
 use crate::tasks::TaskHandle;
@@ -70,7 +70,7 @@ impl Task<NewTask> {
 
         let id: TaskId = query_result.last_insert_rowid();
 
-        Ok( Task {
+        Ok(Task {
             id,
             name: self.name,
             status: self.status,
@@ -83,7 +83,6 @@ impl Task<NewTask> {
     }
 }
 impl Task<TaskId> {
-
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(
             "UPDATE tasks \
@@ -193,7 +192,10 @@ impl Task<TaskId> {
     }
 
     /// Select a Task by its id
-    pub async fn get_by_id(task_id: TaskId, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
+    pub async fn get_by_id(
+        task_id: TaskId,
+        conn: &mut SqliteConnection,
+    ) -> Result<Self, ModelError> {
         let row = sqlx::query(
             "SELECT name, status, last_update_version, handle, job, stderr, stdout \
             FROM tasks WHERE id = ?",
@@ -313,7 +315,10 @@ impl Task<TaskId> {
         Ok(tasks)
     }
 
-    pub async fn command_args(&self, conn: &mut SqliteConnection) -> Result<Vec<TaskCommandArgs<ArgId>>, ModelError> {
+    pub async fn command_args(
+        &self,
+        conn: &mut SqliteConnection,
+    ) -> Result<Vec<TaskCommandArgs<ArgId>>, ModelError> {
         TaskCommandArgs::select_by_task(self.id, conn).await
     }
 
@@ -371,8 +376,10 @@ pub struct TaskDependency<Id> {
 }
 
 impl TaskDependency<NewTaskDep> {
-
-    pub async fn save(self, conn: &mut SqliteConnection) -> Result<TaskDependency<TaskDepId>, ModelError> {
+    pub async fn save(
+        self,
+        conn: &mut SqliteConnection,
+    ) -> Result<TaskDependency<TaskDepId>, ModelError> {
         let query_result =
             sqlx::query("INSERT INTO task_dependencies (job, child, parent) VALUES (?, ?, ?)")
                 .bind(&self.job)
@@ -382,19 +389,16 @@ impl TaskDependency<NewTaskDep> {
                 .await
                 .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         let id: TaskDepId = query_result.last_insert_rowid();
-        Ok(
-            TaskDependency {
-                id,
-                job: self.job,
-                child: self.child,
-                parent: self.parent,
-            }
-        )
+        Ok(TaskDependency {
+            id,
+            job: self.job,
+            child: self.child,
+            parent: self.parent,
+        })
     }
 }
 
 impl TaskDependency<TaskDepId> {
-
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result =
             sqlx::query("UPDATE task_dependencies SET child = ?, parent = ?, job = ? WHERE id = ?")
@@ -440,7 +444,6 @@ impl TaskDependency<TaskDepId> {
     }
 }
 
-
 /// newly created task task command line arg, not existing in db yet
 pub struct NewArg;
 /// id (primary key) of a task command line argument
@@ -470,8 +473,10 @@ pub struct TaskCommandArgs<Id> {
 }
 
 impl TaskCommandArgs<NewArg> {
-
-    pub async fn save(self, conn: &mut SqliteConnection) -> Result<TaskCommandArgs<ArgId>, ModelError> {
+    pub async fn save(
+        self,
+        conn: &mut SqliteConnection,
+    ) -> Result<TaskCommandArgs<ArgId>, ModelError> {
         let query_result = sqlx::query(
             "INSERT INTO task_command_arguments (argument, position, task) \
             VALUES (?, ?, ?)",
@@ -484,14 +489,12 @@ impl TaskCommandArgs<NewArg> {
         .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         let id: ArgId = query_result.last_insert_rowid();
 
-        Ok(
-            TaskCommandArgs {
-                id,
-                argument: self.argument,
-                position: self.position,
-                task: self.task,
-            }
-        )
+        Ok(TaskCommandArgs {
+            id,
+            argument: self.argument,
+            position: self.position,
+            task: self.task,
+        })
     }
 
     pub fn from_strings(command_args: Vec<String>, task_id: TaskId) -> Vec<Self> {
@@ -509,7 +512,6 @@ impl TaskCommandArgs<NewArg> {
 }
 
 impl TaskCommandArgs<ArgId> {
-
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(
             "UPDATE task_command_arguments \
@@ -558,7 +560,6 @@ impl TaskCommandArgs<ArgId> {
         }
         Ok(command_args)
     }
-
 }
 
 /// a small subset of a "tasks" record.

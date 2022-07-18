@@ -164,8 +164,8 @@ mod tests {
 
     #[test]
     fn test_password_verification() {
-        let user =
-            User::<NewUser>::new("debug-user", "debug-password").expect("Failed to build User struct");
+        let user = User::<NewUser>::new("debug-user", "debug-password")
+            .expect("Failed to build User struct");
 
         assert_eq!(user.verify_password("debug-password"), Ok(true));
         assert_eq!(user.verify_password("not-good-password"), Ok(false));

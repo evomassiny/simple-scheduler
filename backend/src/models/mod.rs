@@ -6,18 +6,13 @@ mod tasks;
 mod users;
 
 pub use crate::models::batches::Batch;
-pub use crate::models::common::{Model, ModelError};
-pub use crate::models::jobs::{Job, NewJob, JobId};
+pub use crate::models::common::ModelError;
+pub use crate::models::jobs::{Job, JobId, NewJob};
 pub use crate::models::status::Status;
 pub use crate::models::tasks::{
-    Task, NewTask, TaskId, TaskView,
-    TaskCommandArgs,
-    TaskDependency, NewTaskDep, TaskDepId,
+    NewTask, NewTaskDep, Task, TaskCommandArgs, TaskDepId, TaskDependency, TaskId, TaskView,
 };
-pub use crate::models::users::{
-    create_or_update_user, 
-    User, NewUser, UserId,
-};
+pub use crate::models::users::{create_or_update_user, NewUser, User, UserId};
 
 #[cfg(test)]
 mod test {

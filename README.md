@@ -15,15 +15,76 @@ The app also keeps track of the status of each job, and is able to retreive thei
 
 
 # Install
+1. create empty database
 ```
 cargo install sqlx-cli
 cd backend
-sqlx database create
-sqlx migrate run 
+sqlx database create --database-url sqlite:database.sqlite
+sqlx migrate run --database-url sqlite:database.sqlite
+```
 
+2. create a temporary job directory (for temporary artifacts)
+```
+mkdir /opt/simple-scheduler/process-dirs
+```
+
+3. generate key pairs
+```
+utils/gen_key_pair.sh
+mv keys /opt/simple-scheduler/simple-scheduler/keys
+```
+
+4. create the app configuration file (use `openssl rand -base64 32` to generate your own secret key):
+```bash
+cat << EOF > /opt/simple-scheduler/simple-scheduler/backend/Rocket.toml
+[default]
+address = "0.0.0.0"
+limits = { forms = "64 kB", json = "100 MiB" }
+port = 8000
+
+[release]
+secret_key = "SECRET_KEY"
+database_url = "sqlite:database-prod.sqlite" 
+process_directory = "/opt/simple-scheduler/process-dirs"
+hypervisor_socket_path = "/tmp/simple-scheduler.sock"
+public_key_path = "/opt/simple-scheduler/simple-scheduler/keys/pub.key"
+private_key_path = "/opt/simple-scheduler/simple-scheduler/keys/priv.key"
+nb_of_workers = 10
+EOF
+```
+
+5. Add a user with login: "debug-user", pass: "debug-password"
+```
 cargo build --release
 target/release/simple-scheduler create-user debug-user debug-password
-target/release/simple-scheduler run-server
+```
+
+6. Create a systemd unit file to run the scheduler
+```
+sudo su
+cat << EOF > /usr/lib/systemd/system/simple-scheduler.service
+[Unit]
+Description=Simple Scheduler
+After=network.target
+
+[Service]
+User=${USER}
+Environment=ROCKET_ENV=release
+
+WorkingDirectory=/opt/simple-scheduler/simple-scheduler/backend/
+ExecStart=/opt/simple-scheduler/simple-scheduler/backend/target/release/simple-scheduler run-server
+Type=simple
+PIDFile=/opt/simple-scheduler/simple-scheduler.pid
+
+[Install]
+WantedBy=default.target
+EOF
+```
+
+7. enable and start it:
+```bash
+sudo systemctl enable simple-scheduler.service
+sudo systemctl start simple-scheduler.service
 ```
 
 # Internals

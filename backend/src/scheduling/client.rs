@@ -1,5 +1,5 @@
 use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
-use crate::models::{Batch, ModelError, User, UserId, JobId};
+use crate::models::{Batch, JobId, ModelError, User, UserId};
 use crate::workflows::WorkFlowGraph;
 use rocket::fs::TempFile as RocketTempFile;
 use rocket::http::ContentType;

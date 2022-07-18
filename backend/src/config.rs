@@ -9,6 +9,7 @@ pub struct Config {
     pub hypervisor_socket_path: String,
     pub private_key_path: String,
     pub public_key_path: String,
+    pub nb_of_workers: usize,
 }
 
 impl Config {

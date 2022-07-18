@@ -1,4 +1,4 @@
-use crate::models::{UserId, User};
+use crate::models::{User, UserId};
 use aes::{
     cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit},
     Aes128, Block,

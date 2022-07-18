@@ -1,4 +1,4 @@
-use crate::models::{UserId, User};
+use crate::models::{User, UserId};
 use chrono::{DateTime, Duration, Utc};
 use rocket::http::Cookie;
 use rocket::http::Status;

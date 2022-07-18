@@ -1,5 +1,5 @@
 use crate::messaging::{AsyncSendable, RequestResult, TaskStatus, ToClientMsg, ToSchedulerMsg};
-use crate::models::{Batch, Job, Status, Task, TaskView};
+use crate::models::{Batch, Job, JobId, Status, Task, TaskView};
 use crate::tasks::TaskHandle;
 use rocket::tokio::io::AsyncWriteExt;
 use rocket::tokio::sync::mpsc::UnboundedSender;
@@ -9,6 +9,7 @@ use rocket::tokio::{
     time::Duration,
 };
 use sqlx::sqlite::SqlitePool;
+use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
 
@@ -34,40 +35,57 @@ pub struct SchedulerServer {
     read_pool: SqlitePool,
     write_pool: SqlitePool,
     /// max number number of parallel running tasks
-    max_capacity: usize,
+    nb_of_workers: usize,
 }
 
 impl SchedulerServer {
-    pub fn new(socket: PathBuf, read_pool: SqlitePool, write_pool: SqlitePool) -> Self {
+    pub fn new(
+        socket: PathBuf,
+        read_pool: SqlitePool,
+        write_pool: SqlitePool,
+        nb_of_workers: usize,
+    ) -> Self {
         Self {
             socket,
             read_pool,
             write_pool,
-            max_capacity: 40,
+            nb_of_workers,
         }
     }
 
     /// Check if any job/task is pending, if so, launch them.
+    /// prioritize small jobs.
     async fn update_work_queue(&self) -> Result<(), Box<dyn Error>> {
         let mut read_conn = self.read_pool.acquire().await?;
         let mut running_task_count: usize =
             Task::count_by_status(&Status::Running, &mut read_conn).await?;
         // bail if all running slots are taken
-        if running_task_count >= self.max_capacity {
+        if running_task_count >= self.nb_of_workers {
             return Ok(());
         }
         // select all pending/running job
-        // for each, select all associated tasks
-        //  * if all are finished set job as Finished
-        //  * launch task with met dependancies
         let mut jobs = Job::select_by_status(&Status::Running, &mut read_conn).await?;
         let pendings = Job::select_by_status(&Status::Pending, &mut read_conn).await?;
         jobs.extend(pendings);
+
+        // sort the job by their number of tasks, so small jobs get higher priority,
+        // this prevets huge jobs from clogging the queue.
+        let mut task_count_by_job: HashMap<JobId, usize> = HashMap::new();
+        for job in &jobs {
+            let count = job.task_count(&mut read_conn).await?;
+            task_count_by_job.insert(job.id, count);
+        }
+        // unwrap is safe because `jobs` was not mutated
+        jobs.sort_by_key(|job| *task_count_by_job.get(&job.id).unwrap());
+
+        // for job, select all associated tasks
+        //  * if all are finished set job as Finished
+        //  * launch task with met dependencies
         'job_loop: for job in jobs {
             let mut batch = Batch::from_job(job, &mut read_conn).await?;
             'task_loop: loop {
                 // bail if all running slots are taken
-                if running_task_count >= self.max_capacity {
+                if running_task_count >= self.nb_of_workers {
                     break 'job_loop;
                 }
                 if let Some(task) = batch.next_ready_task().await? {

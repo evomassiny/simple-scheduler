@@ -1,6 +1,6 @@
 use crate::models::{
-    Job, JobId, ModelError, NewJob, NewTask, NewTaskDep, Status, Task,
-    TaskCommandArgs, TaskDependency, TaskDepId, TaskId, UserId,
+    Job, JobId, ModelError, NewJob, NewTask, NewTaskDep, Status, Task, TaskCommandArgs, TaskDepId,
+    TaskDependency, TaskId, UserId,
 };
 use crate::workflows::WorkFlowGraph;
 use sqlx::sqlite::SqliteConnection;
