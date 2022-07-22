@@ -6,7 +6,10 @@ use rocket::tokio::{
         oneshot::Sender,
     },
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use super::status_store::{
+    StoreHandle,
+};
 
 /// TODO: move into "killer actor"
 pub trait KillerHandle {
