@@ -165,7 +165,7 @@ impl TaskHandle {
             .map_err(|_| {
                 "Could not send status request to socket"
                     .to_string()
-                    .to_string()
+                    
             })?;
         sock.shutdown().await?;
         Ok(())
@@ -198,7 +198,7 @@ impl TaskHandle {
         if let Ok(_md) = metadata(self.status_file()).await {
             return true;
         }
-        return false;
+        false
     }
 
     /// return the status of the task
@@ -284,7 +284,7 @@ impl TaskHandle {
             .await?;
         // read ACK
         let response = ToSchedulerMsg::async_read_from(&mut sock).await?;
-        let e = sock.shutdown().await?;
+        let _e = sock.shutdown().await?;
         match response {
             ToSchedulerMsg::Ok => Ok(()),
             msg => Err(format!(

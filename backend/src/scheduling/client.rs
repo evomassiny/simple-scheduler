@@ -1,5 +1,5 @@
 use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
-use crate::models::{Batch, JobId, ModelError, User, UserId};
+use crate::models::{Batch, JobId, User, UserId};
 use crate::workflows::WorkFlowGraph;
 use rocket::fs::TempFile as RocketTempFile;
 use rocket::http::ContentType;
@@ -127,7 +127,7 @@ impl SchedulerClient {
             _ => return Err(Box::new(SchedulerClientError::BadInputFile)),
         };
 
-        let job_id = self.submit_workflow(&file_content, &user).await?;
+        let job_id = self.submit_workflow(&file_content, user).await?;
         Ok(job_id)
     }
 

@@ -6,7 +6,7 @@ use rocket::request::{self, FromRequest, Outcome, Request};
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteConnection;
 
-pub const AUTH_COOKIE_NAME: &'static str = "Authorization";
+pub const AUTH_COOKIE_NAME: &str = "Authorization";
 pub const AUTH_COOKIE_VALID_PERIOD_IN_DAYS: i64 = 1;
 
 #[derive(Debug, Deserialize, Serialize)]

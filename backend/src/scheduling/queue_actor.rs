@@ -7,17 +7,13 @@ use rocket::tokio::{
     },
 };
 use std::collections::HashMap;
-use super::status_store::{
-    StoreHandle,
+use super::cache_actor::{
+    CacheWriter,
 };
 
 /// TODO: move into "killer actor"
 pub trait KillerHandle {
     fn kill(&mut self, task: TaskId);
-}
-/// TODO: move into "task status actor"
-pub trait StoreHandle {
-    fn cancel(&mut self, task: TaskId);
 }
 
 #[derive(Debug)]
@@ -77,7 +73,7 @@ struct QueueActor<K, S> {
     store: S,
 }
 
-impl <K: KillerHandle, S: StoreHandle> QueueActor<K, S> {
+impl <K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
 
     pub fn new(killer: K, store: S) -> Self {
         Self {
@@ -158,7 +154,9 @@ impl <K: KillerHandle, S: StoreHandle> QueueActor<K, S> {
                 // remove all the awaiting ones
                 for id in to_remove {
                     let _ = self.queue.remove(&id);
+                    self.store.cancel_task(id);
                 }
+                self.store.cancel_job(group_id);
             }
         }
         Ok(())
@@ -170,7 +168,7 @@ impl <K: KillerHandle, S: StoreHandle> QueueActor<K, S> {
             // and remove task_id from children dependency list
             TaskEvent::TaskSucceed(task_id) => {
                 // update children
-                let mut task = self
+                let task = self
                     .queue
                     .remove(&task_id)
                     .ok_or(QueueError::UnknownTask(task_id))?;
@@ -183,8 +181,7 @@ impl <K: KillerHandle, S: StoreHandle> QueueActor<K, S> {
                         match &child_task.state {
                             QueuedState::AwaitingParents(parents) => {
                                 let parents: Vec<TaskId> = parents
-                                    .into_iter()
-                                    .map(|id| *id)
+                                    .iter().copied()
                                     .filter(|id| *id != task_id)
                                     .collect();
                                 if parents.is_empty() {
@@ -216,7 +213,7 @@ impl <K: KillerHandle, S: StoreHandle> QueueActor<K, S> {
                             to_remove.extend(grand_children);
                         }
                         // warn store that task was canceled
-                        self.store.cancel(child_id);
+                        self.store.cancel_task(child_id);
                     }
                 }
             }
@@ -240,7 +237,7 @@ impl <K: KillerHandle, S: StoreHandle> QueueActor<K, S> {
                         let _ = self.queue.remove(&task_id);
                     }
                     // cannot reason about it.
-                    state => {
+                    _state => {
                         return Err(QueueError::BadTransition(TaskEvent::TaskStarted(task_id)));
                     }
                 }
@@ -250,7 +247,7 @@ impl <K: KillerHandle, S: StoreHandle> QueueActor<K, S> {
     }
 }
 
-async fn manage_queue<K: KillerHandle, S: StoreHandle>(
+async fn manage_queue<K: KillerHandle, S: CacheWriter>(
     mut queue_actor: QueueActor<K, S>,
     mut events: UnboundedReceiver<TaskEvent>,
     mut orders: UnboundedReceiver<QueueOrder>,
@@ -285,54 +282,75 @@ async fn manage_queue<K: KillerHandle, S: StoreHandle>(
 }
 
 pub fn spawn_queue_actor<K, S>(
-        mut killer: K,
-        mut store: S,
-        mut events: UnboundedReceiver<TaskEvent>,
-        mut orders: UnboundedReceiver<QueueOrder>,
-        mut claims: UnboundedReceiver<ClaimRequest>,
+        killer: K,
+        store: S,
+        events: UnboundedReceiver<TaskEvent>,
+        orders: UnboundedReceiver<QueueOrder>,
+        claims: UnboundedReceiver<ClaimRequest>,
     )
-    where K: KillerHandle + Send + 'static, S: StoreHandle + Send + 'static
+    where K: KillerHandle + Send + 'static, S: CacheWriter + Send + 'static
 {
-    let mut queue_actor = QueueActor::new(killer, store);
+    let queue_actor = QueueActor::new(killer, store);
     tokio::spawn(async move {  manage_queue(queue_actor, events, orders, claims).await } );
 }
+
+/// Handle to the QueueActor,
+/// for the CacheActor
+pub trait QueueNotifier {
+    fn set_task_succeed(&self, task: TaskId);
+    fn set_task_failed(&self, task: TaskId);
+    fn set_task_started(&self, task: TaskId);
+}
+
+pub struct QueueActorHandle<Msg> {
+    queue_actor: UnboundedSender<Msg>,
+}
+impl QueueNotifier for QueueActorHandle<TaskEvent> {
+    fn set_task_succeed(&self, task: TaskId) {
+        self.queue_actor.send(TaskEvent::TaskSucceed(task));
+    }
+
+    fn set_task_failed(&self, task: TaskId) {
+        self.queue_actor.send(TaskEvent::TaskFailed(task));
+    }
+
+    fn set_task_started(&self, task: TaskId) {
+        self.queue_actor.send(TaskEvent::TaskStarted(task));
+    }
+
+}
+
 
 #[cfg(test)]
 mod actor_tests {
     use crate::scheduling::queue_actor::*;
+    use crate::models::Status;
 
-    pub struct KillerMockUp { 
-        pub killed: Vec<TaskId>
-    }
-
+    pub struct KillerMockUp { }
     impl KillerHandle for KillerMockUp {
-        fn kill(&mut self, task: TaskId) {
-            self.killed.push(task);
-        }
+        fn kill(&mut self, _task: TaskId) { }
     }
 
-    pub struct StoreMockUp {
-        pub canceled: Vec<TaskId>,
-    }
-    impl StoreHandle for StoreMockUp {
-        fn cancel(&mut self, task: TaskId) {
-            self.canceled.push(task);
-        }
+    pub struct CacheMockUp { }
+    impl CacheWriter for CacheMockUp {
+        fn cancel_task(&self, _task: TaskId) { }
+        fn cancel_job(&self, _job: JobId) { }
+        fn add_job(&self, _job: JobId, _job_status: Status, _tasks: Vec<(TaskId, Status)>) {}
     }
 
 
     #[tokio::test]
     async fn test_filling_queue_with_one_task() {
-        let killer = KillerMockUp { killed: Vec::new() };
-        let store = StoreMockUp { canceled: Vec::new() };
+        let killer = KillerMockUp {};
+        let store = CacheMockUp {};
         use tokio::sync::{
             mpsc::unbounded_channel,
             oneshot,
         };
 
-        let (task_sender, mut task_receiver) = unbounded_channel::<TaskEvent>();
-        let (order_sender, mut order_receiver) = unbounded_channel::<QueueOrder>();
-        let (claims_sender, mut claims_receiver) = unbounded_channel::<ClaimRequest>();
+        let (_task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
+        let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
+        let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
 
         spawn_queue_actor(killer, store, task_receiver, order_receiver, claims_receiver);
@@ -364,16 +382,16 @@ mod actor_tests {
 
     #[tokio::test]
     async fn test_canceling_tasks() {
-        let killer = KillerMockUp { killed: Vec::new() };
-        let store = StoreMockUp { canceled: Vec::new() };
+        let killer = KillerMockUp {};
+        let store = CacheMockUp {};
         use tokio::sync::{
             mpsc::unbounded_channel,
             oneshot,
         };
 
-        let (task_sender, mut task_receiver) = unbounded_channel::<TaskEvent>();
-        let (order_sender, mut order_receiver) = unbounded_channel::<QueueOrder>();
-        let (claims_sender, mut claims_receiver) = unbounded_channel::<ClaimRequest>();
+        let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
+        let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
+        let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
 
         spawn_queue_actor(killer, store, task_receiver, order_receiver, claims_receiver);
@@ -422,16 +440,16 @@ mod actor_tests {
 
     #[tokio::test]
     async fn test_task_dependency() {
-        let killer = KillerMockUp { killed: Vec::new() };
-        let store = StoreMockUp { canceled: Vec::new() };
+        let killer = KillerMockUp {};
+        let store = CacheMockUp {};
         use tokio::sync::{
             mpsc::unbounded_channel,
             oneshot,
         };
 
-        let (task_sender, mut task_receiver) = unbounded_channel::<TaskEvent>();
-        let (order_sender, mut order_receiver) = unbounded_channel::<QueueOrder>();
-        let (claims_sender, mut claims_receiver) = unbounded_channel::<ClaimRequest>();
+        let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
+        let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
+        let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
         spawn_queue_actor(killer, store, task_receiver, order_receiver, claims_receiver);
         
@@ -502,16 +520,16 @@ mod actor_tests {
     }
 
     async fn test_failure_propagation() {
-        let killer = KillerMockUp { killed: Vec::new() };
-        let store = StoreMockUp { canceled: Vec::new() };
+        let killer = KillerMockUp {};
+        let store = CacheMockUp {};
         use tokio::sync::{
             mpsc::unbounded_channel,
             oneshot,
         };
 
-        let (task_sender, mut task_receiver) = unbounded_channel::<TaskEvent>();
-        let (order_sender, mut order_receiver) = unbounded_channel::<QueueOrder>();
-        let (claims_sender, mut claims_receiver) = unbounded_channel::<ClaimRequest>();
+        let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
+        let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
+        let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
         spawn_queue_actor(killer, store, task_receiver, order_receiver, claims_receiver);
         

@@ -92,7 +92,7 @@ impl Batch {
             .await
             .map_err(|e| ModelError::DbError(e.to_string()))?;
         Ok(Self {
-            job: job,
+            job,
             tasks,
             dependencies,
         })

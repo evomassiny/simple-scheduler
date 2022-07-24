@@ -1,4 +1,4 @@
-use crate::models::{ModelError, Status, Task, User, UserId};
+use crate::models::{ModelError, Status, Task, UserId};
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
 use chrono::{NaiveDateTime, Utc};

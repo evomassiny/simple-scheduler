@@ -140,7 +140,7 @@ impl SchedulerServer {
         update_version: Option<i64>,
         work_queue: &UnboundedSender<WorkQueueMsg>,
     ) -> Result<(), Box<dyn Error>> {
-        let status = Status::from_task_status(&task_status);
+        let status = Status::from_task_status(task_status);
 
         let version_updated = {
             let mut write_conn = self
@@ -226,7 +226,7 @@ impl SchedulerServer {
         let non_terminated_tasks =
             TaskView::select_by_status(&Status::Running, &mut *read_conn).await?;
 
-        if non_terminated_tasks.len() > 0 {
+        if !non_terminated_tasks.is_empty() {
             println!(
                 "Found {} unfinished tasks. Requesting status...",
                 non_terminated_tasks.len()
