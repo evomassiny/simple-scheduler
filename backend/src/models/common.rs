@@ -1,5 +1,3 @@
-
-
 /// Existing (stored in database) model
 pub struct Existing {
     pub id: i64,

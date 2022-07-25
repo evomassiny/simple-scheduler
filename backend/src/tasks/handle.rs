@@ -162,11 +162,7 @@ impl TaskHandle {
         let _ = ExecutorQuery::Start
             .async_send_to(&mut sock)
             .await
-            .map_err(|_| {
-                "Could not send status request to socket"
-                    .to_string()
-                    
-            })?;
+            .map_err(|_| "Could not send status request to socket".to_string())?;
         sock.shutdown().await?;
         Ok(())
     }

@@ -1,22 +1,17 @@
-use crate::models::{JobId, TaskId, Status};
+use crate::models::{JobId, Status, TaskId};
 use rocket::tokio::{
     self,
-    sync::{
-        mpsc::{UnboundedReceiver},
-        oneshot::Sender,
-    },
+    sync::{mpsc::UnboundedReceiver, oneshot::Sender},
 };
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use super::queue_actor::{
-    QueueNotifier,
-};
+use super::queue_actor::QueueNotifier;
 
-type StatusAge = usize;
+type StatusVersion = usize;
 type AccessId = usize;
 
 pub const ACCESS_COUNT_ORIGIN: usize = 0;
-
 
 #[derive(Debug)]
 pub enum CacheError {
@@ -24,11 +19,13 @@ pub enum CacheError {
     UnknownJob(JobId),
 }
 
+/// A status notication,
+/// coming from the monitor processus
 pub enum TaskStatusNotif {
     HasStatus {
         task_id: TaskId,
         status: Status,
-        age: StatusAge,
+        age: StatusVersion,
     },
 }
 
@@ -39,14 +36,14 @@ pub enum CacheResponse {
         id: JobId,
         status: Status,
         task_statuses: Vec<(TaskId, Status)>,
-    }
+    },
 }
 
 pub enum ReadRequest {
     /// ask for the status of a Job
     GetJob {
         id: JobId,
-        from: Sender<CacheResponse>
+        from: Sender<CacheResponse>,
     },
 }
 pub enum WriteRequest {
@@ -56,28 +53,36 @@ pub enum WriteRequest {
     /// be handled with `CancelTask` requests
     CancelJob(JobId),
     /// Add new Pending job
-    AddNewJob {
-        id: JobId,
-        tasks: Vec<TaskId>,
-    },
+    AddNewJob { id: JobId, tasks: Vec<TaskId> },
     /// Add Cache entry from DB (after cache miss)
-    AddExistingJob{
+    AddExistingJob {
         id: JobId,
         status: Status,
         tasks: Vec<(TaskId, Status)>,
     },
 }
 
-pub struct Job {
+struct Job {
     id: JobId,
     status: Status,
     tasks: Vec<TaskId>,
     last_access: AccessId,
 }
 
+struct Task {
+    /// Optional because we might get a task status
+    /// before receiving its associated "Add{New,Existing}Job"
+    /// request.
+    job: Option<JobId>,
+    status: Status,
+    /// Each status update comes with a version number,
+    /// the version is maintained by the monitor process itself
+    version: StatusVersion,
+}
+
 pub struct Cache<T> {
     queue_handle: T,
-    tasks: HashMap<TaskId, (StatusAge, Status)>,
+    tasks: HashMap<TaskId, Task>,
     jobs: HashMap<JobId, Job>,
     /// counter
     access_counter: AccessId,
@@ -85,23 +90,27 @@ pub struct Cache<T> {
     capacity: usize,
 }
 
-impl <T: QueueNotifier> Cache<T> {
-
+impl<T: QueueNotifier> Cache<T> {
     /// increment the access counter,
     /// handle overflows by reseting all jobs age
     /// (while keeping the acces order)
     fn increment_access_counter(&mut self) {
         match self.access_counter {
             AccessId::MAX => {
-                let mut accesses: Vec<(AccessId, JobId)> = self.jobs.values().map(|job| (job.last_access, job.id)).collect();
+                let mut accesses: Vec<(AccessId, JobId)> = self
+                    .jobs
+                    .values()
+                    .map(|job| (job.last_access, job.id))
+                    .collect();
                 accesses.sort_by_key(|&(access, _id)| access);
                 for (index, (_access, job_id)) in accesses.iter().enumerate() {
-                    self.jobs.get_mut(job_id)
+                    self.jobs
+                        .get_mut(job_id)
                         .unwrap() // safe because key and values.id are garantied to be consisitent
                         .last_access = index;
                 }
                 self.access_counter = accesses.len();
-            },
+            }
             _ => {
                 self.access_counter += 1;
             }
@@ -111,13 +120,20 @@ impl <T: QueueNotifier> Cache<T> {
     /// Iter all stored jobs, and remove
     /// the least recently accessed job
     fn drop_least_recently_accessed_job(&mut self) -> Result<(), CacheError> {
-        let mut accesses: Vec<(AccessId, JobId)> = self.jobs.values().map(|job| (job.last_access, job.id)).collect();
+        let mut accesses: Vec<(AccessId, JobId)> = self
+            .jobs
+            .values()
+            .map(|job| (job.last_access, job.id))
+            .collect();
         accesses.sort_by_key(|&(access, _id)| access);
         if let Some((_access, id)) = accesses.first() {
             // unwrap is safe because the id wa
             let job = self.jobs.remove(id).ok_or(CacheError::UnknownJob(*id))?;
             for task_id in job.tasks {
-                let _task = self.tasks.remove(&task_id).ok_or(CacheError::UnknownTask(*id))?;
+                let _task = self
+                    .tasks
+                    .remove(&task_id)
+                    .ok_or(CacheError::UnknownTask(*id))?;
             }
         }
         Ok(())
@@ -125,24 +141,107 @@ impl <T: QueueNotifier> Cache<T> {
 
     pub fn handle_status_notication(&mut self, notif: TaskStatusNotif) -> Result<(), CacheError> {
         match notif {
-                TaskStatusNotif::HasStatus { task_id, status, age } => {
-                    let must_update: bool = if let Some(status_tuple) = self.tasks.get(&task_id) {
-                        age >= status_tuple.0
-                    } else { true };
-                    if must_update {
-                        // warn Queue Actor
-                        match status {
-                            Status::Failed | Status::Killed => self.queue_handle.set_task_failed(task_id),
-                            Status::Running => self.queue_handle.set_task_started(task_id),
-                            Status::Succeed => self.queue_handle.set_task_succeed(task_id),
-                            _ => eprintln!("Bad status transtition.")
-                        }
-                        self.tasks.insert(task_id, (age, status));
-                        //self.sync_task(task_id);
+            TaskStatusNotif::HasStatus {
+                task_id,
+                status,
+                age,
+            } => {
+                let maybe_job;
+                let is_different;
+                match self.tasks.entry(task_id) {
+                    Entry::Vacant(entry) => {
+                        let task = Task {
+                            status,
+                            version: age,
+                            job: None,
+                        };
+                        entry.insert(task);
+
+                        maybe_job = None;
+                        is_different = true;
                     }
-            },
+                    Entry::Occupied(mut entry) => {
+                        let mut task = entry.get_mut();
+                        task.version = age;
+
+                        maybe_job = task.job;
+                        is_different = task.status == status;
+
+                        task.status = status;
+                    }
+                }
+                if is_different {
+                    // warn Queue Actor
+                    match status {
+                        Status::Failed | Status::Killed => {
+                            self.queue_handle.set_task_failed(task_id)
+                        }
+                        Status::Running => self.queue_handle.set_task_started(task_id),
+                        Status::Succeed => self.queue_handle.set_task_succeed(task_id),
+                        _ => eprintln!("Bad status transtition."),
+                    }
+
+                    if let Some(job_id) = maybe_job {
+                        let _ = self.update_job_status(job_id)?;
+                    }
+                    //self.sync_task(task_id);
+                }
+            }
         }
         Ok(())
+    }
+
+    /// Lookup state of all tasks composing the job, and update its status accordingly.
+    ///
+    /// * If all task failed => failure
+    /// * If ONE task canceled => Canceled
+    /// * If ONE task Stopped => Stopped
+    /// * If ONE task Killed => killed
+    /// * If mix failure/succed => succeed
+    fn update_job_status(&mut self, job_id: JobId) -> Result<Status, CacheError> {
+        let mut job = self
+            .jobs
+            .get_mut(&job_id)
+            .ok_or(CacheError::UnknownJob(job_id))?;
+        let mut statuses = Vec::new();
+        for task_id in &job.tasks {
+            statuses.push(
+                self.tasks
+                    .get(task_id)
+                    .ok_or(CacheError::UnknownTask(*task_id))?
+                    .status,
+            );
+        }
+        for status in &statuses {
+            if !status.is_finished() {
+                // if there is remaining tasks
+                // no need to update job staus
+                return Ok(job.status);
+            }
+        }
+        let mut job_status = Status::Failed;
+        for status in &statuses {
+            match status {
+                Status::Stopped => {
+                    job_status = Status::Stopped;
+                    break;
+                }
+                Status::Canceled => {
+                    job_status = Status::Failed;
+                    break;
+                }
+                Status::Killed => {
+                    job_status = Status::Killed;
+                    break;
+                }
+                Status::Succeed => {
+                    job_status = Status::Succeed;
+                }
+                _ => {}
+            }
+        }
+        job.status = job_status;
+        Ok(job_status)
     }
 
     pub fn handle_read_request(&mut self, request: ReadRequest) -> Result<(), CacheError> {
@@ -159,24 +258,21 @@ impl <T: QueueNotifier> Cache<T> {
                             Vec::with_capacity(job.tasks.len());
                         // collect all task statuses
                         for task_id in &job.tasks {
-                            task_statuses.push(
-                                (
-                                    *task_id,
-                                    self.tasks.get(task_id)
-                                        .ok_or(CacheError::UnknownTask(*task_id))?
-                                        .1
-                                )
-                            );
+                            task_statuses.push((
+                                *task_id,
+                                self.tasks
+                                    .get(task_id)
+                                    .ok_or(CacheError::UnknownTask(*task_id))?
+                                    .status,
+                            ));
                         }
                         // send status
-                        from.send(
-                            CacheResponse::JobStatus {
-                                id,
-                                status: job.status,
-                                task_statuses, 
-                            }
-                        );
-                    },
+                        from.send(CacheResponse::JobStatus {
+                            id,
+                            status: job.status,
+                            task_statuses,
+                        });
+                    }
                     None => {
                         from.send(CacheResponse::UnknownJob);
                     }
@@ -186,20 +282,31 @@ impl <T: QueueNotifier> Cache<T> {
         Ok(())
     }
 
-    fn add_job(&mut self, id: JobId, status: Status, tasks: Vec<(TaskId, Status)>) -> Result<(), CacheError> {
+    fn add_job(
+        &mut self,
+        id: JobId,
+        status: Status,
+        tasks: Vec<(TaskId, Status)>,
+    ) -> Result<(), CacheError> {
         let mut task_ids = Vec::with_capacity(tasks.len());
         for (task_id, status) in tasks {
             // don't override existing status
-            let _ = self.tasks.entry(task_id)
-                .or_insert((ACCESS_COUNT_ORIGIN, status));
+            let _ = self.tasks.entry(task_id).or_insert(Task {
+                job: Some(id),
+                status,
+                version: 0,
+            });
             task_ids.push(task_id);
         }
-        self.jobs.insert(id, Job {
-            last_access: self.access_counter,
-            tasks: task_ids,
-            status,
+        self.jobs.insert(
             id,
-        });
+            Job {
+                last_access: self.access_counter,
+                tasks: task_ids,
+                status,
+                id,
+            },
+        );
         if self.jobs.len() > self.capacity {
             let _ = self.drop_least_recently_accessed_job()?;
         }
@@ -210,28 +317,34 @@ impl <T: QueueNotifier> Cache<T> {
     pub fn handle_write_request(&mut self, request: WriteRequest) -> Result<(), CacheError> {
         self.increment_access_counter();
         match request {
-            /// Add a new (pending) Job to the cache
+            // Add a new (pending) Job to the cache
             WriteRequest::AddNewJob { id, tasks } => {
-                let tasks = tasks.iter().map(|task_id| (*task_id, Status::Pending)).collect();
+                let tasks = tasks
+                    .iter()
+                    .map(|task_id| (*task_id, Status::Pending))
+                    .collect();
                 self.add_job(id, Status::Pending, tasks);
                 // TODO!
-                //self.update_job_status(id);
+                let _new_status = self.update_job_status(id)?;
                 //self.sync_job();
                 //self.sync_task();
-            },
-            /// Add an existing Job to the cache
+            }
+            // Add an existing Job to the cache
             WriteRequest::AddExistingJob { id, status, tasks } => {
                 self.add_job(id, status, tasks);
-            },
+            }
             WriteRequest::CancelTask(task_id) => {
-                self.tasks.get_mut(&task_id)
+                self.tasks
+                    .get_mut(&task_id)
                     .ok_or(CacheError::UnknownTask(task_id))?
-                    .1 = Status::Canceled;
-                    // TODO!
+                    .status = Status::Canceled;
+                // TODO!
                 //self.sync_task();
             }
             WriteRequest::CancelJob(job_id) => {
-                let mut job = self.jobs.get_mut(&job_id)
+                let mut job = self
+                    .jobs
+                    .get_mut(&job_id)
                     .ok_or(CacheError::UnknownTask(job_id))?;
                 job.status = Status::Canceled;
                 job.last_access = self.access_counter;
@@ -242,8 +355,7 @@ impl <T: QueueNotifier> Cache<T> {
     }
 }
 
-
-/// 
+///
 pub trait CacheWriter {
     fn cancel_task(&self, task: TaskId);
     fn cancel_job(&self, job: JobId);
@@ -258,7 +370,7 @@ async fn manage_cache<Q: QueueNotifier>(
 ) {
     loop {
         tokio::select! {
-           // this asserts that futures are polled in order, eg 
+           // this asserts that futures are polled in order, eg
            // it introduce a priority task event > orders > claim request
            biased;
            Some(read_request) = read_requests.recv() => {
@@ -285,13 +397,13 @@ async fn manage_cache<Q: QueueNotifier>(
 }
 
 pub fn spawn_cache_actor<Q>(
-        queue_handle: Q,
-        read_requests: UnboundedReceiver<ReadRequest>,
-        write_requests: UnboundedReceiver<WriteRequest>,
-        task_notifs: UnboundedReceiver<TaskStatusNotif>,
-        capacity: usize,
-    )
-    where Q: QueueNotifier + Send + 'static
+    queue_handle: Q,
+    read_requests: UnboundedReceiver<ReadRequest>,
+    write_requests: UnboundedReceiver<WriteRequest>,
+    task_notifs: UnboundedReceiver<TaskStatusNotif>,
+    capacity: usize,
+) where
+    Q: QueueNotifier + Send + 'static,
 {
     let cache_actor = Cache {
         queue_handle,
@@ -300,5 +412,7 @@ pub fn spawn_cache_actor<Q>(
         access_counter: ACCESS_COUNT_ORIGIN,
         capacity,
     };
-    tokio::spawn(async move {  manage_cache(cache_actor, read_requests, write_requests, task_notifs).await } );
+    tokio::spawn(async move {
+        manage_cache(cache_actor, read_requests, write_requests, task_notifs).await
+    });
 }

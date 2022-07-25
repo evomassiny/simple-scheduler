@@ -1,4 +1,3 @@
-
 use crate::models::{JobId, ModelError, Status};
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;

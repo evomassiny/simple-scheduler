@@ -1,3 +1,4 @@
+use super::cache_actor::CacheWriter;
 use crate::models::{JobId, TaskId};
 use rocket::tokio::{
     self,
@@ -7,9 +8,6 @@ use rocket::tokio::{
     },
 };
 use std::collections::HashMap;
-use super::cache_actor::{
-    CacheWriter,
-};
 
 /// TODO: move into "killer actor"
 pub trait KillerHandle {
@@ -64,7 +62,7 @@ pub enum TaskEvent {
 
 #[derive(Debug)]
 pub struct ClaimRequest {
-    claimer: Sender<Option<TaskId>>
+    claimer: Sender<Option<TaskId>>,
 }
 
 struct QueueActor<K, S> {
@@ -73,8 +71,7 @@ struct QueueActor<K, S> {
     store: S,
 }
 
-impl <K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
-
+impl<K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
     pub fn new(killer: K, store: S) -> Self {
         Self {
             queue: HashMap::new(),
@@ -93,14 +90,17 @@ impl <K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
         readys.sort_by_key(|(_id, priority)| *priority);
         let response = match readys.get(0) {
             Some((task_id, _priority)) => {
-                self.queue.get_mut(task_id)
+                self.queue
+                    .get_mut(task_id)
                     .ok_or(QueueError::UnknownTask(*task_id))?
                     .state = QueuedState::Claimed;
                 Some(*task_id)
-            },
+            }
             None => None,
         };
-        let _ = req.claimer.send(response)
+        let _ = req
+            .claimer
+            .send(response)
             .map_err(|_| QueueError::SendFailed)?;
         Ok(())
     }
@@ -181,7 +181,8 @@ impl <K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
                         match &child_task.state {
                             QueuedState::AwaitingParents(parents) => {
                                 let parents: Vec<TaskId> = parents
-                                    .iter().copied()
+                                    .iter()
+                                    .copied()
                                     .filter(|id| *id != task_id)
                                     .collect();
                                 if parents.is_empty() {
@@ -255,7 +256,7 @@ async fn manage_queue<K: KillerHandle, S: CacheWriter>(
 ) {
     loop {
         tokio::select! {
-           // this asserts that futures are polled in order, eg 
+           // this asserts that futures are polled in order, eg
            // it introduce a priority task event > orders > claim request
            biased;
            Some(event) = events.recv() => {
@@ -282,16 +283,17 @@ async fn manage_queue<K: KillerHandle, S: CacheWriter>(
 }
 
 pub fn spawn_queue_actor<K, S>(
-        killer: K,
-        store: S,
-        events: UnboundedReceiver<TaskEvent>,
-        orders: UnboundedReceiver<QueueOrder>,
-        claims: UnboundedReceiver<ClaimRequest>,
-    )
-    where K: KillerHandle + Send + 'static, S: CacheWriter + Send + 'static
+    killer: K,
+    store: S,
+    events: UnboundedReceiver<TaskEvent>,
+    orders: UnboundedReceiver<QueueOrder>,
+    claims: UnboundedReceiver<ClaimRequest>,
+) where
+    K: KillerHandle + Send + 'static,
+    S: CacheWriter + Send + 'static,
 {
     let queue_actor = QueueActor::new(killer, store);
-    tokio::spawn(async move {  manage_queue(queue_actor, events, orders, claims).await } );
+    tokio::spawn(async move { manage_queue(queue_actor, events, orders, claims).await });
 }
 
 /// Handle to the QueueActor,
@@ -317,45 +319,44 @@ impl QueueNotifier for QueueActorHandle<TaskEvent> {
     fn set_task_started(&self, task: TaskId) {
         self.queue_actor.send(TaskEvent::TaskStarted(task));
     }
-
 }
-
 
 #[cfg(test)]
 mod actor_tests {
-    use crate::scheduling::queue_actor::*;
     use crate::models::Status;
+    use crate::scheduling::queue_actor::*;
 
-    pub struct KillerMockUp { }
+    pub struct KillerMockUp {}
     impl KillerHandle for KillerMockUp {
-        fn kill(&mut self, _task: TaskId) { }
+        fn kill(&mut self, _task: TaskId) {}
     }
 
-    pub struct CacheMockUp { }
+    pub struct CacheMockUp {}
     impl CacheWriter for CacheMockUp {
-        fn cancel_task(&self, _task: TaskId) { }
-        fn cancel_job(&self, _job: JobId) { }
+        fn cancel_task(&self, _task: TaskId) {}
+        fn cancel_job(&self, _job: JobId) {}
         fn add_job(&self, _job: JobId, _job_status: Status, _tasks: Vec<(TaskId, Status)>) {}
     }
-
 
     #[tokio::test]
     async fn test_filling_queue_with_one_task() {
         let killer = KillerMockUp {};
         let store = CacheMockUp {};
-        use tokio::sync::{
-            mpsc::unbounded_channel,
-            oneshot,
-        };
+        use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
         let (_task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
         let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
+        spawn_queue_actor(
+            killer,
+            store,
+            task_receiver,
+            order_receiver,
+            claims_receiver,
+        );
 
-        spawn_queue_actor(killer, store, task_receiver, order_receiver, claims_receiver);
-        
-        let order = QueueOrder::SubmitTask { 
+        let order = QueueOrder::SubmitTask {
             id: 42,
             group: 0,
             number_of_task_in_group: 1,
@@ -370,7 +371,7 @@ mod actor_tests {
         let _ = claims_sender.send(request).expect("request failed");
         let task: Option<TaskId> = receiver.await.expect("response failed");
         assert_eq!(task, Some(42));
-        
+
         // Request another task
         let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
         let request = ClaimRequest { claimer: sender };
@@ -379,25 +380,26 @@ mod actor_tests {
         assert_eq!(task, None);
     }
 
-
     #[tokio::test]
     async fn test_canceling_tasks() {
         let killer = KillerMockUp {};
         let store = CacheMockUp {};
-        use tokio::sync::{
-            mpsc::unbounded_channel,
-            oneshot,
-        };
+        use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
         let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
         let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
+        spawn_queue_actor(
+            killer,
+            store,
+            task_receiver,
+            order_receiver,
+            claims_receiver,
+        );
 
-        spawn_queue_actor(killer, store, task_receiver, order_receiver, claims_receiver);
-        
         // Spawn 2 tasks
-        let order = QueueOrder::SubmitTask { 
+        let order = QueueOrder::SubmitTask {
             id: 1,
             group: 0,
             number_of_task_in_group: 2,
@@ -405,7 +407,7 @@ mod actor_tests {
             parents: None,
         };
         let _ = order_sender.send(order).expect("failed to send task");
-        let order = QueueOrder::SubmitTask { 
+        let order = QueueOrder::SubmitTask {
             id: 2,
             group: 0,
             number_of_task_in_group: 2,
@@ -420,15 +422,15 @@ mod actor_tests {
         let _ = claims_sender.send(request).expect("request failed");
         let task: Option<TaskId> = receiver.await.expect("response failed");
         assert_eq!(task, Some(1));
-        
+
         // run the firt one: declare it as started
         let task_event = TaskEvent::TaskStarted(1);
         let _ = task_sender.send(task_event).expect("status update failed");
-        
+
         // Cancel the job
         let order = QueueOrder::CancelGroup(0);
         let _ = order_sender.send(order).expect("failed to send task");
-        
+
         // Request another task, assert that there is none
         let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
         let request = ClaimRequest { claimer: sender };
@@ -437,27 +439,29 @@ mod actor_tests {
         assert_eq!(task, None);
     }
 
-
     #[tokio::test]
     async fn test_task_dependency() {
         let killer = KillerMockUp {};
         let store = CacheMockUp {};
-        use tokio::sync::{
-            mpsc::unbounded_channel,
-            oneshot,
-        };
+        use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
         let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
         let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
-        spawn_queue_actor(killer, store, task_receiver, order_receiver, claims_receiver);
-        
+        spawn_queue_actor(
+            killer,
+            store,
+            task_receiver,
+            order_receiver,
+            claims_receiver,
+        );
+
         // Spawn 3 tasks, with dependencies:
         //     1
         //   /  \
         //  2    3
-        let order = QueueOrder::SubmitTask { 
+        let order = QueueOrder::SubmitTask {
             id: 1,
             group: 0,
             number_of_task_in_group: 3,
@@ -465,7 +469,7 @@ mod actor_tests {
             parents: None,
         };
         let _ = order_sender.send(order).expect("failed to send task");
-        let order = QueueOrder::SubmitTask { 
+        let order = QueueOrder::SubmitTask {
             id: 2,
             group: 0,
             number_of_task_in_group: 3,
@@ -473,7 +477,7 @@ mod actor_tests {
             parents: Some(vec![1]),
         };
         let _ = order_sender.send(order).expect("failed to send task");
-        let order = QueueOrder::SubmitTask { 
+        let order = QueueOrder::SubmitTask {
             id: 3,
             group: 0,
             number_of_task_in_group: 3,
@@ -488,19 +492,19 @@ mod actor_tests {
         let _ = claims_sender.send(request).expect("request failed");
         let task: Option<TaskId> = receiver.await.expect("response failed");
         assert_eq!(task, Some(1));
-        
+
         // run the firt one: declare it as started
         let task_event = TaskEvent::TaskStarted(1);
         let _ = task_sender.send(task_event).expect("status update failed");
-        
-        // Request another task, assert that there is none, because the dependency 
+
+        // Request another task, assert that there is none, because the dependency
         // of the 2 remaining ones are not fulfilled
         let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
         let request = ClaimRequest { claimer: sender };
         let _ = claims_sender.send(request).expect("request failed");
         let task: Option<TaskId> = receiver.await.expect("response failed");
         assert_eq!(task, None);
-        
+
         // finish the first one
         let task_event = TaskEvent::TaskSucceed(1);
         let _ = task_sender.send(task_event).expect("status update failed");
@@ -510,36 +514,39 @@ mod actor_tests {
         let request = ClaimRequest { claimer: sender };
         let _ = claims_sender.send(request).expect("request failed");
         let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert!(task == Some(2) || task == Some(3) );
+        assert!(task == Some(2) || task == Some(3));
 
         let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
         let request = ClaimRequest { claimer: sender };
         let _ = claims_sender.send(request).expect("request failed");
         let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert!(task == Some(2) || task == Some(3) );
+        assert!(task == Some(2) || task == Some(3));
     }
 
     async fn test_failure_propagation() {
         let killer = KillerMockUp {};
         let store = CacheMockUp {};
-        use tokio::sync::{
-            mpsc::unbounded_channel,
-            oneshot,
-        };
+        use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
         let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
         let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
-        spawn_queue_actor(killer, store, task_receiver, order_receiver, claims_receiver);
-        
+        spawn_queue_actor(
+            killer,
+            store,
+            task_receiver,
+            order_receiver,
+            claims_receiver,
+        );
+
         // Spawn 3 tasks, with dependencies:
         //     1
         //     |
         //     2
         //     |
         //     3
-        let order = QueueOrder::SubmitTask { 
+        let order = QueueOrder::SubmitTask {
             id: 1,
             group: 0,
             number_of_task_in_group: 3,
@@ -547,7 +554,7 @@ mod actor_tests {
             parents: None,
         };
         let _ = order_sender.send(order).expect("failed to send task");
-        let order = QueueOrder::SubmitTask { 
+        let order = QueueOrder::SubmitTask {
             id: 2,
             group: 0,
             number_of_task_in_group: 3,
@@ -555,7 +562,7 @@ mod actor_tests {
             parents: Some(vec![1]),
         };
         let _ = order_sender.send(order).expect("failed to send task");
-        let order = QueueOrder::SubmitTask { 
+        let order = QueueOrder::SubmitTask {
             id: 3,
             group: 0,
             number_of_task_in_group: 3,
@@ -570,22 +577,22 @@ mod actor_tests {
         let _ = claims_sender.send(request).expect("request failed");
         let task: Option<TaskId> = receiver.await.expect("response failed");
         assert_eq!(task, Some(1));
-        
+
         // run the firt one: declare it as started
         let task_event = TaskEvent::TaskStarted(1);
         let _ = task_sender.send(task_event).expect("status update failed");
-        
+
         // finish the first one
         let task_event = TaskEvent::TaskSucceed(1);
         let _ = task_sender.send(task_event).expect("status update failed");
-        
+
         // claim the second one
         let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
         let request = ClaimRequest { claimer: sender };
         let _ = claims_sender.send(request).expect("request failed");
         let task: Option<TaskId> = receiver.await.expect("response failed");
         assert_eq!(task, Some(2));
-        
+
         // start it
         let task_event = TaskEvent::TaskStarted(2);
         let _ = task_sender.send(task_event).expect("status update failed");
@@ -593,7 +600,7 @@ mod actor_tests {
         // mark it as failed
         let task_event = TaskEvent::TaskFailed(2);
         let _ = task_sender.send(task_event).expect("status update failed");
-        
+
         // assert that the remaining one cannot be claimed,
         // because its dependency (task 2) failed.
         let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
