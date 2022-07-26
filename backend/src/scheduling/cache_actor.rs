@@ -17,10 +17,12 @@ pub const ACCESS_COUNT_ORIGIN: usize = 0;
 pub enum CacheError {
     UnknownTask(TaskId),
     UnknownJob(JobId),
+    SendFailed,
 }
 
 /// A status notication,
 /// coming from the monitor processus
+#[derive(Debug)]
 pub enum TaskStatusNotif {
     HasStatus {
         task_id: TaskId,
@@ -29,6 +31,7 @@ pub enum TaskStatusNotif {
     },
 }
 
+#[derive(PartialEq, Debug)]
 pub enum CacheResponse {
     /// either a cache miss, of a non-existent JobId
     UnknownJob,
@@ -39,6 +42,7 @@ pub enum CacheResponse {
     },
 }
 
+#[derive(Debug)]
 pub enum ReadRequest {
     /// ask for the status of a Job
     GetJob {
@@ -46,6 +50,8 @@ pub enum ReadRequest {
         from: Sender<CacheResponse>,
     },
 }
+
+#[derive(Debug)]
 pub enum WriteRequest {
     /// Cancel a task (maybe its parent failed)
     CancelTask(TaskId),
@@ -62,6 +68,7 @@ pub enum WriteRequest {
     },
 }
 
+#[derive(Debug)]
 struct Job {
     id: JobId,
     status: Status,
@@ -69,6 +76,7 @@ struct Job {
     last_access: AccessId,
 }
 
+#[derive(Debug)]
 struct Task {
     /// Optional because we might get a task status
     /// before receiving its associated "Add{New,Existing}Job"
@@ -165,7 +173,7 @@ impl<T: QueueNotifier> Cache<T> {
                         task.version = age;
 
                         maybe_job = task.job;
-                        is_different = task.status == status;
+                        is_different = task.status != status;
 
                         task.status = status;
                     }
@@ -212,13 +220,25 @@ impl<T: QueueNotifier> Cache<T> {
                     .status,
             );
         }
+        let mut has_running = false;
+        let mut finished = true;
         for status in &statuses {
             if !status.is_finished() {
-                // if there is remaining tasks
-                // no need to update job staus
-                return Ok(job.status);
+                finished = false;
+                if let Status::Running = status {
+                    has_running = true;
+                }
             }
         }
+        if has_running {
+            job.status = Status::Running;
+            return Ok(Status::Running);
+        }
+        if !finished {
+            job.status = Status::Pending;
+            return Ok(Status::Pending);
+        }
+
         let mut job_status = Status::Failed;
         for status in &statuses {
             match status {
@@ -267,14 +287,14 @@ impl<T: QueueNotifier> Cache<T> {
                             ));
                         }
                         // send status
-                        from.send(CacheResponse::JobStatus {
+                        let _ = from.send(CacheResponse::JobStatus {
                             id,
                             status: job.status,
                             task_statuses,
-                        });
+                        }).map_err(|_| CacheError::SendFailed)?;
                     }
                     None => {
-                        from.send(CacheResponse::UnknownJob);
+                        let _ = from.send(CacheResponse::UnknownJob).map_err(|_| CacheError::SendFailed)?;
                     }
                 }
             }
@@ -323,15 +343,15 @@ impl<T: QueueNotifier> Cache<T> {
                     .iter()
                     .map(|task_id| (*task_id, Status::Pending))
                     .collect();
-                self.add_job(id, Status::Pending, tasks);
-                // TODO!
+                let _ = self.add_job(id, Status::Pending, tasks)?;
                 let _new_status = self.update_job_status(id)?;
+                // TODO!
                 //self.sync_job();
                 //self.sync_task();
             }
             // Add an existing Job to the cache
             WriteRequest::AddExistingJob { id, status, tasks } => {
-                self.add_job(id, status, tasks);
+                let _ = self.add_job(id, status, tasks)?;
             }
             WriteRequest::CancelTask(task_id) => {
                 self.tasks
@@ -371,14 +391,8 @@ async fn manage_cache<Q: QueueNotifier>(
     loop {
         tokio::select! {
            // this asserts that futures are polled in order, eg
-           // it introduce a priority task event > orders > claim request
+           // it introduce a priority 'writes from queue' > 'writes from monitors' > 'read request'
            biased;
-           Some(read_request) = read_requests.recv() => {
-                match cache_actor.handle_read_request(read_request) {
-                    Ok(_) => {},
-                    Err(error) => eprintln!("Cache actor failed while processing read: {:?}", error)
-                }
-           },
            Some(write_request) = write_requests.recv() => {
                 match cache_actor.handle_write_request(write_request) {
                     Ok(_) => {},
@@ -389,6 +403,12 @@ async fn manage_cache<Q: QueueNotifier>(
                 match cache_actor.handle_status_notication(status_notification) {
                     Ok(_) => {},
                     Err(error) => eprintln!("Cache actor failed while processing status notif: {:?}", error)
+                }
+           },
+           Some(read_request) = read_requests.recv() => {
+                match cache_actor.handle_read_request(read_request) {
+                    Ok(_) => {},
+                    Err(error) => eprintln!("Cache actor failed while processing read: {:?}", error)
                 }
            },
            else => break
@@ -415,4 +435,65 @@ pub fn spawn_cache_actor<Q>(
     tokio::spawn(async move {
         manage_cache(cache_actor, read_requests, write_requests, task_notifs).await
     });
+}
+
+#[cfg(test)]
+mod actor_tests {
+    use crate::models::Status;
+    use crate::scheduling::cache_actor::*;
+    use crate::scheduling::queue_actor::QueueNotifier;
+    use tokio::sync::{mpsc::unbounded_channel, oneshot};
+
+    pub struct QueueMockUp {}
+    impl QueueNotifier for QueueMockUp {
+        fn set_task_succeed(&self, task: TaskId) {}
+        fn set_task_failed(&self, task: TaskId) {}
+        fn set_task_started(&self, task: TaskId) {}
+    }
+
+    #[tokio::test]
+    async fn test_adding_jobs() {
+        let queue = QueueMockUp {};
+
+        let (read_tx, read_rx) = unbounded_channel::<ReadRequest>();
+        let (write_tx, write_rx) = unbounded_channel::<WriteRequest>();
+        let (status_tx, status_rx) = unbounded_channel::<TaskStatusNotif>();
+
+        spawn_cache_actor(queue, read_rx, write_rx, status_rx, 5);
+
+        // Add a new Job
+        let write_request = WriteRequest::AddNewJob {
+            id: 0,
+            tasks: vec![0, 1],
+        };
+        let _ = write_tx
+            .send(write_request)
+            .expect("failed to write to cache");
+
+        // start task 0
+        let status_update = TaskStatusNotif::HasStatus {
+            task_id: 0,
+            status: Status::Running,
+            age: 1,
+        };
+        let _ = status_tx
+            .send(status_update)
+            .expect("failed to update task to cache");
+
+        // request job status
+        let (tx, rx) = oneshot::channel::<CacheResponse>();
+        let read_request = ReadRequest::GetJob { id: 0, from: tx };
+        let _ = read_tx
+            .send(read_request)
+            .expect("failed to send read request");
+        let reponse: CacheResponse = rx.await.expect("response failed");
+        assert_eq!(
+            reponse,
+            CacheResponse::JobStatus {
+                id: 0,
+                status: Status::Running,
+                task_statuses: vec![(0, Status::Running), (1, Status::Pending)],
+            }
+        );
+    }
 }
