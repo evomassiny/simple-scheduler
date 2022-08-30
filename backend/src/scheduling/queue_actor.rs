@@ -1,4 +1,5 @@
 use super::cache_actor::CacheWriter;
+use super::executor_actor::ExecutorHandle;
 use crate::models::{JobId, TaskId};
 use rocket::tokio::{
     self,
@@ -8,11 +9,6 @@ use rocket::tokio::{
     },
 };
 use std::collections::HashMap;
-
-/// TODO: move into "killer actor"
-pub trait KillerHandle {
-    fn kill(&mut self, task: TaskId);
-}
 
 #[derive(Debug)]
 pub enum QueueError {
@@ -34,10 +30,17 @@ pub struct QueuedTask {
 
 #[derive(Debug)]
 pub enum QueuedState {
+    /// task must wait for its parent
     AwaitingParents(Vec<TaskId>),
-    AwaitingSubmission,
+    /// task can be spawned
+    AwaitingSpawning,
+    /// we requested to cancel a task right
+    /// after spawning it, before it even ran.
     AwaitingMurder,
-    Claimed,
+    /// the task as been spawned,
+    /// but we dont know (yet) if it's running.
+    Spawned,
+    /// task is running
     Running,
 }
 
@@ -67,42 +70,54 @@ pub struct ClaimRequest {
 
 struct QueueActor<K, S> {
     queue: HashMap<TaskId, QueuedTask>,
-    killer: K,
+    executor_handle: K,
     store: S,
+    worker_pool_size: usize,
+    busy_workers: usize,
 }
 
-impl<K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
-    pub fn new(killer: K, store: S) -> Self {
+impl<K: ExecutorHandle, S: CacheWriter> QueueActor<K, S> {
+    pub fn new(executor_handle: K, store: S, worker_pool_size: usize) -> Self {
         Self {
             queue: HashMap::new(),
-            killer,
+            executor_handle,
             store,
+            worker_pool_size,
+            busy_workers: 0,
         }
     }
 
-    pub fn handle_claim_request(&mut self, req: ClaimRequest) -> Result<(), QueueError> {
+    pub fn has_idle_workers(&self) -> bool {
+        self.busy_workers < self.worker_pool_size
+    }
+
+    /// try to spawn a task, return true if any task has been spawned
+    pub fn spawn_task_to_executor(&mut self) -> Result<bool, QueueError> {
+        // select tasks that are ready to be launched
         let mut readys: Vec<(TaskId, usize)> = Vec::new();
         for task in self.queue.values() {
-            if let QueuedState::AwaitingSubmission = task.state {
+            if let QueuedState::AwaitingSpawning = task.state {
                 readys.push((task.id, task.priority));
             }
         }
+        // pick the highest priority one
         readys.sort_by_key(|(_id, priority)| *priority);
-        let response = match readys.get(0) {
+        let has_spawned = match readys.get(0) {
             Some((task_id, _priority)) => {
+                // set task status as "Spawned"
                 self.queue
                     .get_mut(task_id)
                     .ok_or(QueueError::UnknownTask(*task_id))?
-                    .state = QueuedState::Claimed;
-                Some(*task_id)
+                    .state = QueuedState::Spawned;
+                // consider that the task has taken a slot
+                self.busy_workers += 1;
+                // spawn it
+                self.executor_handle.spawn(*task_id);
+                true
             }
-            None => None,
+            None => false,
         };
-        let _ = req
-            .claimer
-            .send(response)
-            .map_err(|_| QueueError::SendFailed)?;
-        Ok(())
+        Ok(has_spawned)
     }
 
     pub fn handle_order(&mut self, order: QueueOrder) -> Result<(), QueueError> {
@@ -117,7 +132,7 @@ impl<K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
             } => {
                 let state = match parents {
                     Some(parents) => QueuedState::AwaitingParents(parents),
-                    None => QueuedState::AwaitingSubmission,
+                    None => QueuedState::AwaitingSpawning,
                 };
                 let task = QueuedTask {
                     id,
@@ -139,12 +154,12 @@ impl<K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
                         continue;
                     }
                     match task.state {
-                        QueuedState::Claimed => {
+                        QueuedState::Spawned => {
                             task.state = QueuedState::AwaitingMurder;
                         }
                         QueuedState::Running => {
                             // kill the runnning ones
-                            self.killer.kill(task.id);
+                            self.executor_handle.kill(task.id);
                             task.state = QueuedState::AwaitingMurder;
                         }
                         QueuedState::AwaitingMurder => {}
@@ -186,7 +201,7 @@ impl<K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
                                     .filter(|id| *id != task_id)
                                     .collect();
                                 if parents.is_empty() {
-                                    child_task.state = QueuedState::AwaitingSubmission;
+                                    child_task.state = QueuedState::AwaitingSpawning;
                                 } else {
                                     child_task.state = QueuedState::AwaitingParents(parents);
                                 }
@@ -195,6 +210,11 @@ impl<K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
                         }
                     }
                 }
+                // update running task count
+                self.busy_workers = match self.busy_workers {
+                    0 => 0,
+                    nb => nb - 1,
+                };
             }
             // remove task and its children from queue,
             TaskEvent::TaskFailed(task_id) => {
@@ -217,6 +237,11 @@ impl<K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
                         self.store.cancel_task(child_id);
                     }
                 }
+                // update running task count
+                self.busy_workers = match self.busy_workers {
+                    0 => 0,
+                    nb => nb - 1,
+                };
             }
             // mark the task as running, unless
             // it was marked as 'AwaitingMurder'
@@ -228,12 +253,12 @@ impl<K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
                     .ok_or(QueueError::UnknownTask(task_id))?;
                 match &task.state {
                     // mark task as runnning
-                    QueuedState::Claimed => {
+                    QueuedState::Spawned => {
                         task.state = QueuedState::Running;
                     }
                     // kill task then remove it
                     QueuedState::AwaitingMurder => {
-                        self.killer.kill(task_id);
+                        self.executor_handle.kill(task_id);
                         drop(task);
                         let _ = self.queue.remove(&task_id);
                     }
@@ -248,11 +273,10 @@ impl<K: KillerHandle, S: CacheWriter> QueueActor<K, S> {
     }
 }
 
-async fn manage_queue<K: KillerHandle, S: CacheWriter>(
+async fn manage_queue<K: ExecutorHandle, S: CacheWriter>(
     mut queue_actor: QueueActor<K, S>,
     mut events: UnboundedReceiver<TaskEvent>,
     mut orders: UnboundedReceiver<QueueOrder>,
-    mut claims: UnboundedReceiver<ClaimRequest>,
 ) {
     loop {
         tokio::select! {
@@ -271,29 +295,38 @@ async fn manage_queue<K: KillerHandle, S: CacheWriter>(
                     Err(error) => eprintln!("queue actor: {:?}", error)
                 }
            },
-           Some(claim) = claims.recv() => {
-                match queue_actor.handle_claim_request(claim) {
-                    Ok(_) => {},
-                    Err(error) => eprintln!("queue actor: {:?}", error)
-                }
-           },
            else => break
         }
+        // spawn tasks if we can
+        'spawn_loop: while queue_actor.has_idle_workers() {
+            //eprintln!("Spawning");
+            match queue_actor.spawn_task_to_executor() {
+                Ok(has_spawned_a_task) => {
+                    if !has_spawned_a_task {
+                        // no task could be spawned, we can 
+                        // stop 
+                        break 'spawn_loop;
+                    }
+                },
+                Err(error) => eprintln!("queue actor: {:?}", error)
+            }
+        }
+
     }
 }
 
 pub fn spawn_queue_actor<K, S>(
-    killer: K,
+    executor_handle: K,
     store: S,
     events: UnboundedReceiver<TaskEvent>,
     orders: UnboundedReceiver<QueueOrder>,
-    claims: UnboundedReceiver<ClaimRequest>,
+    worker_pool_size: usize,
 ) where
-    K: KillerHandle + Send + 'static,
+    K: ExecutorHandle + Send + 'static,
     S: CacheWriter + Send + 'static,
 {
-    let queue_actor = QueueActor::new(killer, store);
-    tokio::spawn(async move { manage_queue(queue_actor, events, orders, claims).await });
+    let queue_actor = QueueActor::new(executor_handle, store, worker_pool_size);
+    tokio::spawn(async move { manage_queue(queue_actor, events, orders).await });
 }
 
 /// Handle to the QueueActor,
@@ -322,13 +355,25 @@ impl QueueNotifier for QueueActorHandle<TaskEvent> {
 }
 
 #[cfg(test)]
-mod actor_tests {
+mod queue_actor_tests {
     use crate::models::Status;
     use crate::scheduling::queue_actor::*;
 
-    pub struct KillerMockUp {}
-    impl KillerHandle for KillerMockUp {
-        fn kill(&mut self, _task: TaskId) {}
+    pub struct ExecutorMockUp {
+        pub spawn_tx: UnboundedSender<TaskId>,
+        pub kill_tx: UnboundedSender<TaskId>,
+    }
+    impl ExecutorHandle for ExecutorMockUp {
+        fn kill(&mut self, task: TaskId) { 
+            if let Err(e) = self.kill_tx.send(task) {
+                eprintln!("kill send: {}", e);
+            }
+        }
+        fn spawn(&mut self, task: TaskId) {
+            if let Err(e) = self.spawn_tx.send(task) {
+                eprintln!("spawn send: {}", e);
+            }
+        }
     }
 
     pub struct CacheMockUp {}
@@ -340,20 +385,24 @@ mod actor_tests {
 
     #[tokio::test]
     async fn test_filling_queue_with_one_task() {
-        let killer = KillerMockUp {};
-        let store = CacheMockUp {};
         use tokio::sync::{mpsc::unbounded_channel, oneshot};
+        // build executor mock-up
+        let (mut spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
+        let (mut kill_tx, mut kill_rx) = unbounded_channel::<TaskId>();
+
+        let mut executor_handle = ExecutorMockUp {spawn_tx, kill_tx };
+
+        let store = CacheMockUp {};
 
         let (_task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
-        let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
         spawn_queue_actor(
-            killer,
+            executor_handle,
             store,
             task_receiver,
             order_receiver,
-            claims_receiver,
+            10,
         );
 
         let order = QueueOrder::SubmitTask {
@@ -364,38 +413,31 @@ mod actor_tests {
             parents: None,
         };
         let _ = order_sender.send(order).expect("failed to send task");
-
-        // Request one task
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert_eq!(task, Some(42));
-
-        // Request another task
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert_eq!(task, None);
+        
+        // assert that the first one has been spawned
+        assert_eq!(spawn_rx.recv().await, Some(42));
     }
 
     #[tokio::test]
     async fn test_canceling_tasks() {
-        let killer = KillerMockUp {};
-        let store = CacheMockUp {};
         use tokio::sync::{mpsc::unbounded_channel, oneshot};
+        use tokio::sync::mpsc::error::TryRecvError;
+        // build executor mock-up
+        let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
+        let (kill_tx, mut kill_rx) = unbounded_channel::<TaskId>();
+        let mut executor_handle = ExecutorMockUp {spawn_tx, kill_tx };
+
+        let store = CacheMockUp {};
 
         let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
-        let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
         spawn_queue_actor(
-            killer,
+            executor_handle,
             store,
             task_receiver,
             order_receiver,
-            claims_receiver,
+            10,
         );
 
         // Spawn 2 tasks
@@ -416,12 +458,8 @@ mod actor_tests {
         };
         let _ = order_sender.send(order).expect("failed to send task");
 
-        // run the firt one: Claim it
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert_eq!(task, Some(1));
+        // assert that the first one has been spawned
+        assert_eq!(spawn_rx.recv().await, Some(1));
 
         // run the firt one: declare it as started
         let task_event = TaskEvent::TaskStarted(1);
@@ -430,31 +468,36 @@ mod actor_tests {
         // Cancel the job
         let order = QueueOrder::CancelGroup(0);
         let _ = order_sender.send(order).expect("failed to send task");
-
-        // Request another task, assert that there is none
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert_eq!(task, None);
+        
+        // assert that the second one has been killed
+        assert_eq!(kill_rx.recv().await, Some(1));
+        
+        // declare the first one as failed (killed)
+        let task_event = TaskEvent::TaskFailed(1);
+        let _ = task_sender.send(task_event).expect("status update failed");
+        assert_eq!(spawn_rx.try_recv(), Err(TryRecvError::Empty));
     }
 
     #[tokio::test]
     async fn test_task_dependency() {
-        let killer = KillerMockUp {};
+        use tokio::sync::mpsc::error::TryRecvError;
+        // build executor mock-up
+        let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
+        let (kill_tx, mut kill_rx) = unbounded_channel::<TaskId>();
+        let mut executor_handle = ExecutorMockUp {spawn_tx, kill_tx };
+    
         let store = CacheMockUp {};
         use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
         let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
-        let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
         spawn_queue_actor(
-            killer,
+            executor_handle,
             store,
             task_receiver,
             order_receiver,
-            claims_receiver,
+            10,
         );
 
         // Spawn 3 tasks, with dependencies:
@@ -486,58 +529,47 @@ mod actor_tests {
         };
         let _ = order_sender.send(order).expect("failed to send task");
 
-        // run the firt one: Claim it
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert_eq!(task, Some(1));
+        // assert that the first one has been spawned
+        assert_eq!(spawn_rx.recv().await, Some(1));
 
         // run the firt one: declare it as started
         let task_event = TaskEvent::TaskStarted(1);
         let _ = task_sender.send(task_event).expect("status update failed");
 
-        // Request another task, assert that there is none, because the dependency
+        // assert that the first has _NOT_ been spawned
+        // because the dependency
         // of the 2 remaining ones are not fulfilled
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert_eq!(task, None);
+        assert_eq!(spawn_rx.try_recv(), Err(TryRecvError::Empty));
 
         // finish the first one
         let task_event = TaskEvent::TaskSucceed(1);
         let _ = task_sender.send(task_event).expect("status update failed");
 
-        // assert that the 2 remainings can be claimed
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert!(task == Some(2) || task == Some(3));
-
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert!(task == Some(2) || task == Some(3));
+        // assert that the 2 remainings have been spawned
+        assert!(spawn_rx.recv().await.is_some());
+        assert!(spawn_rx.recv().await.is_some());
     }
 
+    #[tokio::test]
     async fn test_failure_propagation() {
-        let killer = KillerMockUp {};
+        use tokio::sync::mpsc::error::TryRecvError;
         let store = CacheMockUp {};
         use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
+        // build executor mock-up
+        let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
+        let (kill_tx, mut kill_rx) = unbounded_channel::<TaskId>();
+        let mut executor_handle = ExecutorMockUp {spawn_tx, kill_tx };
+    
         let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
-        let (claims_sender, claims_receiver) = unbounded_channel::<ClaimRequest>();
 
         spawn_queue_actor(
-            killer,
+            executor_handle,
             store,
             task_receiver,
             order_receiver,
-            claims_receiver,
+            10,
         );
 
         // Spawn 3 tasks, with dependencies:
@@ -570,13 +602,9 @@ mod actor_tests {
             parents: Some(vec![2]),
         };
         let _ = order_sender.send(order).expect("failed to send task");
-
-        // run the firt one: Claim it
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert_eq!(task, Some(1));
+        
+        // assert that the first one has been spawned
+        assert_eq!(spawn_rx.recv().await, Some(1));
 
         // run the firt one: declare it as started
         let task_event = TaskEvent::TaskStarted(1);
@@ -586,14 +614,10 @@ mod actor_tests {
         let task_event = TaskEvent::TaskSucceed(1);
         let _ = task_sender.send(task_event).expect("status update failed");
 
-        // claim the second one
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert_eq!(task, Some(2));
+        // assert that the second one has been spawned
+        assert_eq!(spawn_rx.recv().await, Some(2));
 
-        // start it
+        // start the second one
         let task_event = TaskEvent::TaskStarted(2);
         let _ = task_sender.send(task_event).expect("status update failed");
 
@@ -603,10 +627,6 @@ mod actor_tests {
 
         // assert that the remaining one cannot be claimed,
         // because its dependency (task 2) failed.
-        let (sender, receiver) = oneshot::channel::<Option<TaskId>>();
-        let request = ClaimRequest { claimer: sender };
-        let _ = claims_sender.send(request).expect("request failed");
-        let task: Option<TaskId> = receiver.await.expect("response failed");
-        assert_eq!(task, None);
+        assert_eq!(spawn_rx.try_recv(), Err(TryRecvError::Empty));
     }
 }

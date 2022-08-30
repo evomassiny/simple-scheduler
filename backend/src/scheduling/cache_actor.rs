@@ -88,7 +88,7 @@ struct Task {
     version: StatusVersion,
 }
 
-pub struct Cache<T> {
+pub struct CacheActor<T> {
     queue_handle: T,
     tasks: HashMap<TaskId, Task>,
     jobs: HashMap<JobId, Job>,
@@ -98,7 +98,7 @@ pub struct Cache<T> {
     capacity: usize,
 }
 
-impl<T: QueueNotifier> Cache<T> {
+impl<T: QueueNotifier> CacheActor<T> {
     /// increment the access counter,
     /// handle overflows by reseting all jobs age
     /// (while keeping the acces order)
@@ -383,7 +383,7 @@ pub trait CacheWriter {
 }
 
 async fn manage_cache<Q: QueueNotifier>(
-    mut cache_actor: Cache<Q>,
+    mut cache_actor: CacheActor<Q>,
     mut read_requests: UnboundedReceiver<ReadRequest>,
     mut write_requests: UnboundedReceiver<WriteRequest>,
     mut task_notifs: UnboundedReceiver<TaskStatusNotif>,
@@ -425,7 +425,7 @@ pub fn spawn_cache_actor<Q>(
 ) where
     Q: QueueNotifier + Send + 'static,
 {
-    let cache_actor = Cache {
+    let cache_actor = CacheActor {
         queue_handle,
         tasks: HashMap::new(),
         jobs: HashMap::new(),
