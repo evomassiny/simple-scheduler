@@ -1,12 +1,12 @@
 use crate::models::{JobId, Status, TaskId};
 use rocket::tokio::{
     self,
-    sync::{mpsc::UnboundedReceiver, oneshot::Sender},
+    sync::{mpsc::{UnboundedSender, UnboundedReceiver}, oneshot::Sender},
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use super::queue_actor::QueueNotifier;
+use super::queue_actor::QueueHandle;
 
 type StatusVersion = usize;
 type AccessId = usize;
@@ -98,7 +98,7 @@ pub struct CacheActor<T> {
     capacity: usize,
 }
 
-impl<T: QueueNotifier> CacheActor<T> {
+impl<T: QueueHandle> CacheActor<T> {
     /// increment the access counter,
     /// handle overflows by reseting all jobs age
     /// (while keeping the acces order)
@@ -287,14 +287,18 @@ impl<T: QueueNotifier> CacheActor<T> {
                             ));
                         }
                         // send status
-                        let _ = from.send(CacheResponse::JobStatus {
-                            id,
-                            status: job.status,
-                            task_statuses,
-                        }).map_err(|_| CacheError::SendFailed)?;
+                        let _ = from
+                            .send(CacheResponse::JobStatus {
+                                id,
+                                status: job.status,
+                                task_statuses,
+                            })
+                            .map_err(|_| CacheError::SendFailed)?;
                     }
                     None => {
-                        let _ = from.send(CacheResponse::UnknownJob).map_err(|_| CacheError::SendFailed)?;
+                        let _ = from
+                            .send(CacheResponse::UnknownJob)
+                            .map_err(|_| CacheError::SendFailed)?;
                     }
                 }
             }
@@ -375,14 +379,32 @@ impl<T: QueueNotifier> CacheActor<T> {
     }
 }
 
-///
-pub trait CacheWriter {
+/// trait for interacting with the CacheActor
+pub trait CacheWriteHandle {
     fn cancel_task(&self, task: TaskId);
     fn cancel_job(&self, job: JobId);
     fn add_job(&self, job: JobId, job_status: Status, tasks: Vec<(TaskId, Status)>);
 }
 
-async fn manage_cache<Q: QueueNotifier>(
+/// handle to CacheActor
+pub struct CacheActorHandle {
+    pub to_cache: UnboundedSender<WriteRequest>,
+}
+impl CacheWriteHandle for CacheActorHandle {
+    fn cancel_task(&self, task: TaskId) {
+        let _ = self.to_cache.send(WriteRequest::CancelTask(task));
+    }
+
+    fn cancel_job(&self, job: JobId) {
+        let _ = self.to_cache.send(WriteRequest::CancelJob(job));
+    }
+
+    fn add_job(&self, job: JobId, job_status: Status, tasks: Vec<(TaskId, Status)>) {
+        let _ = self.to_cache.send(WriteRequest::AddExistingJob{ id: job, status: job_status, tasks });
+    }
+}
+
+async fn manage_cache<Q: QueueHandle>(
     mut cache_actor: CacheActor<Q>,
     mut read_requests: UnboundedReceiver<ReadRequest>,
     mut write_requests: UnboundedReceiver<WriteRequest>,
@@ -423,7 +445,7 @@ pub fn spawn_cache_actor<Q>(
     task_notifs: UnboundedReceiver<TaskStatusNotif>,
     capacity: usize,
 ) where
-    Q: QueueNotifier + Send + 'static,
+    Q: QueueHandle + Send + 'static,
 {
     let cache_actor = CacheActor {
         queue_handle,
@@ -441,14 +463,14 @@ pub fn spawn_cache_actor<Q>(
 mod actor_tests {
     use crate::models::Status;
     use crate::scheduling::cache_actor::*;
-    use crate::scheduling::queue_actor::QueueNotifier;
+    use crate::scheduling::queue_actor::QueueHandle;
     use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
     pub struct QueueMockUp {}
-    impl QueueNotifier for QueueMockUp {
-        fn set_task_succeed(&self, task: TaskId) {}
-        fn set_task_failed(&self, task: TaskId) {}
-        fn set_task_started(&self, task: TaskId) {}
+    impl QueueHandle for QueueMockUp {
+        fn set_task_succeed(&self, _task: TaskId) {}
+        fn set_task_failed(&self, _task: TaskId) {}
+        fn set_task_started(&self, _task: TaskId) {}
     }
 
     #[tokio::test]

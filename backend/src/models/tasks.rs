@@ -190,6 +190,24 @@ impl Task<TaskId> {
         Ok(task_id)
     }
 
+    /// Select an handle by the id of its task
+    pub async fn get_handle_by_task_id(
+        conn: &mut SqliteConnection,
+        id: TaskId,
+    ) -> Result<TaskHandle, ModelError> {
+        let row = sqlx::query("SELECT handle FROM tasks WHERE id = ?")
+            .bind(&id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|_| ModelError::ModelNotFound)?;
+        let handle: String = row
+            .try_get("handle")
+            .map_err(|_| ModelError::ColumnError("handle".to_string()))?;
+        Ok(TaskHandle {
+            directory: PathBuf::from(handle),
+        })
+    }
+
     /// Select a Task by its id
     pub async fn get_by_id(
         task_id: TaskId,
@@ -527,7 +545,11 @@ impl TaskCommandArgs<ArgId> {
         Ok(())
     }
 
-    async fn select_by_task(
+    /**
+     * returns an ordered Vec of command line arguments
+     * sorted by their argc.
+     */
+    pub async fn select_by_task(
         task_id: TaskId,
         conn: &mut SqliteConnection,
     ) -> Result<Vec<Self>, ModelError> {

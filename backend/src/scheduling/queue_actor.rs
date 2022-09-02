@@ -1,11 +1,10 @@
-use super::cache_actor::CacheWriter;
+use super::cache_actor::CacheWriteHandle;
 use super::executor_actor::ExecutorHandle;
 use crate::models::{JobId, TaskId};
 use rocket::tokio::{
     self,
     sync::{
         mpsc::{UnboundedReceiver, UnboundedSender},
-        oneshot::Sender,
     },
 };
 use std::collections::HashMap;
@@ -63,12 +62,7 @@ pub enum TaskEvent {
     TaskStarted(TaskId),
 }
 
-#[derive(Debug)]
-pub struct ClaimRequest {
-    claimer: Sender<Option<TaskId>>,
-}
-
-struct QueueActor<K, S> {
+pub struct QueueActor<K, S> {
     queue: HashMap<TaskId, QueuedTask>,
     executor_handle: K,
     store: S,
@@ -76,7 +70,7 @@ struct QueueActor<K, S> {
     busy_workers: usize,
 }
 
-impl<K: ExecutorHandle, S: CacheWriter> QueueActor<K, S> {
+impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
     pub fn new(executor_handle: K, store: S, worker_pool_size: usize) -> Self {
         Self {
             queue: HashMap::new(),
@@ -273,7 +267,7 @@ impl<K: ExecutorHandle, S: CacheWriter> QueueActor<K, S> {
     }
 }
 
-async fn manage_queue<K: ExecutorHandle, S: CacheWriter>(
+async fn manage_queue<K: ExecutorHandle, S: CacheWriteHandle>(
     mut queue_actor: QueueActor<K, S>,
     mut events: UnboundedReceiver<TaskEvent>,
     mut orders: UnboundedReceiver<QueueOrder>,
@@ -303,15 +297,14 @@ async fn manage_queue<K: ExecutorHandle, S: CacheWriter>(
             match queue_actor.spawn_task_to_executor() {
                 Ok(has_spawned_a_task) => {
                     if !has_spawned_a_task {
-                        // no task could be spawned, we can 
-                        // stop 
+                        // no task could be spawned, we can
+                        // stop
                         break 'spawn_loop;
                     }
-                },
-                Err(error) => eprintln!("queue actor: {:?}", error)
+                }
+                Err(error) => eprintln!("queue actor: {:?}", error),
             }
         }
-
     }
 }
 
@@ -323,7 +316,7 @@ pub fn spawn_queue_actor<K, S>(
     worker_pool_size: usize,
 ) where
     K: ExecutorHandle + Send + 'static,
-    S: CacheWriter + Send + 'static,
+    S: CacheWriteHandle + Send + 'static,
 {
     let queue_actor = QueueActor::new(executor_handle, store, worker_pool_size);
     tokio::spawn(async move { manage_queue(queue_actor, events, orders).await });
@@ -331,26 +324,26 @@ pub fn spawn_queue_actor<K, S>(
 
 /// Handle to the QueueActor,
 /// for the CacheActor
-pub trait QueueNotifier {
+pub trait QueueHandle {
     fn set_task_succeed(&self, task: TaskId);
     fn set_task_failed(&self, task: TaskId);
     fn set_task_started(&self, task: TaskId);
 }
 
-pub struct QueueActorHandle<Msg> {
-    queue_actor: UnboundedSender<Msg>,
+pub struct QueueActorHandle {
+    pub queue_actor: UnboundedSender<TaskEvent>,
 }
-impl QueueNotifier for QueueActorHandle<TaskEvent> {
+impl QueueHandle for QueueActorHandle {
     fn set_task_succeed(&self, task: TaskId) {
-        self.queue_actor.send(TaskEvent::TaskSucceed(task));
+        let _ = self.queue_actor.send(TaskEvent::TaskSucceed(task));
     }
 
     fn set_task_failed(&self, task: TaskId) {
-        self.queue_actor.send(TaskEvent::TaskFailed(task));
+        let _ = self.queue_actor.send(TaskEvent::TaskFailed(task));
     }
 
     fn set_task_started(&self, task: TaskId) {
-        self.queue_actor.send(TaskEvent::TaskStarted(task));
+        let _ = self.queue_actor.send(TaskEvent::TaskStarted(task));
     }
 }
 
@@ -364,7 +357,7 @@ mod queue_actor_tests {
         pub kill_tx: UnboundedSender<TaskId>,
     }
     impl ExecutorHandle for ExecutorMockUp {
-        fn kill(&mut self, task: TaskId) { 
+        fn kill(&mut self, task: TaskId) {
             if let Err(e) = self.kill_tx.send(task) {
                 eprintln!("kill send: {}", e);
             }
@@ -377,7 +370,7 @@ mod queue_actor_tests {
     }
 
     pub struct CacheMockUp {}
-    impl CacheWriter for CacheMockUp {
+    impl CacheWriteHandle for CacheMockUp {
         fn cancel_task(&self, _task: TaskId) {}
         fn cancel_job(&self, _job: JobId) {}
         fn add_job(&self, _job: JobId, _job_status: Status, _tasks: Vec<(TaskId, Status)>) {}
@@ -385,25 +378,19 @@ mod queue_actor_tests {
 
     #[tokio::test]
     async fn test_filling_queue_with_one_task() {
-        use tokio::sync::{mpsc::unbounded_channel, oneshot};
+        use tokio::sync::{mpsc::unbounded_channel};
         // build executor mock-up
-        let (mut spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
-        let (mut kill_tx, mut kill_rx) = unbounded_channel::<TaskId>();
+        let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
+        let (kill_tx, _kill_rx) = unbounded_channel::<TaskId>();
 
-        let mut executor_handle = ExecutorMockUp {spawn_tx, kill_tx };
+        let executor_handle = ExecutorMockUp { spawn_tx, kill_tx };
 
         let store = CacheMockUp {};
 
         let (_task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
 
-        spawn_queue_actor(
-            executor_handle,
-            store,
-            task_receiver,
-            order_receiver,
-            10,
-        );
+        spawn_queue_actor(executor_handle, store, task_receiver, order_receiver, 10);
 
         let order = QueueOrder::SubmitTask {
             id: 42,
@@ -413,32 +400,26 @@ mod queue_actor_tests {
             parents: None,
         };
         let _ = order_sender.send(order).expect("failed to send task");
-        
+
         // assert that the first one has been spawned
         assert_eq!(spawn_rx.recv().await, Some(42));
     }
 
     #[tokio::test]
     async fn test_canceling_tasks() {
-        use tokio::sync::{mpsc::unbounded_channel, oneshot};
         use tokio::sync::mpsc::error::TryRecvError;
+        use tokio::sync::{mpsc::unbounded_channel};
         // build executor mock-up
         let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
         let (kill_tx, mut kill_rx) = unbounded_channel::<TaskId>();
-        let mut executor_handle = ExecutorMockUp {spawn_tx, kill_tx };
+        let executor_handle = ExecutorMockUp { spawn_tx, kill_tx };
 
         let store = CacheMockUp {};
 
         let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
 
-        spawn_queue_actor(
-            executor_handle,
-            store,
-            task_receiver,
-            order_receiver,
-            10,
-        );
+        spawn_queue_actor(executor_handle, store, task_receiver, order_receiver, 10);
 
         // Spawn 2 tasks
         let order = QueueOrder::SubmitTask {
@@ -468,10 +449,10 @@ mod queue_actor_tests {
         // Cancel the job
         let order = QueueOrder::CancelGroup(0);
         let _ = order_sender.send(order).expect("failed to send task");
-        
+
         // assert that the second one has been killed
         assert_eq!(kill_rx.recv().await, Some(1));
-        
+
         // declare the first one as failed (killed)
         let task_event = TaskEvent::TaskFailed(1);
         let _ = task_sender.send(task_event).expect("status update failed");
@@ -483,22 +464,16 @@ mod queue_actor_tests {
         use tokio::sync::mpsc::error::TryRecvError;
         // build executor mock-up
         let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
-        let (kill_tx, mut kill_rx) = unbounded_channel::<TaskId>();
-        let mut executor_handle = ExecutorMockUp {spawn_tx, kill_tx };
-    
+        let (kill_tx, _kill_rx) = unbounded_channel::<TaskId>();
+        let executor_handle = ExecutorMockUp { spawn_tx, kill_tx };
+
         let store = CacheMockUp {};
-        use tokio::sync::{mpsc::unbounded_channel, oneshot};
+        use tokio::sync::{mpsc::unbounded_channel};
 
         let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
 
-        spawn_queue_actor(
-            executor_handle,
-            store,
-            task_receiver,
-            order_receiver,
-            10,
-        );
+        spawn_queue_actor(executor_handle, store, task_receiver, order_receiver, 10);
 
         // Spawn 3 tasks, with dependencies:
         //     1
@@ -554,23 +529,17 @@ mod queue_actor_tests {
     async fn test_failure_propagation() {
         use tokio::sync::mpsc::error::TryRecvError;
         let store = CacheMockUp {};
-        use tokio::sync::{mpsc::unbounded_channel, oneshot};
+        use tokio::sync::{mpsc::unbounded_channel};
 
         // build executor mock-up
         let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
-        let (kill_tx, mut kill_rx) = unbounded_channel::<TaskId>();
-        let mut executor_handle = ExecutorMockUp {spawn_tx, kill_tx };
-    
+        let (kill_tx, _kill_rx) = unbounded_channel::<TaskId>();
+        let executor_handle = ExecutorMockUp { spawn_tx, kill_tx };
+
         let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
 
-        spawn_queue_actor(
-            executor_handle,
-            store,
-            task_receiver,
-            order_receiver,
-            10,
-        );
+        spawn_queue_actor(executor_handle, store, task_receiver, order_receiver, 10);
 
         // Spawn 3 tasks, with dependencies:
         //     1
@@ -602,7 +571,7 @@ mod queue_actor_tests {
             parents: Some(vec![2]),
         };
         let _ = order_sender.send(order).expect("failed to send task");
-        
+
         // assert that the first one has been spawned
         assert_eq!(spawn_rx.recv().await, Some(1));
 
