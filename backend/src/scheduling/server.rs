@@ -313,6 +313,7 @@ impl SchedulerServer {
     ) -> Result<(), Box<dyn Error>> {
         let msg = ToSchedulerMsg::async_read_from(stream).await?;
         match msg {
+            /*
             // update task status from the task monitor
             ToSchedulerMsg::StatusUpdate {
                 task_handle,
@@ -331,6 +332,7 @@ impl SchedulerServer {
                     version: update_version,
                 })?;
             }
+            */
             // Update work queue.
             ToSchedulerMsg::JobAppended => {
                 // send update request message to dedicated actor

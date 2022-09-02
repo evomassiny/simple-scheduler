@@ -7,6 +7,7 @@ mod server;
 mod cache_actor;
 mod executor_actor;
 mod queue_actor;
+mod status_aggregator_actor;
 
 pub use crate::scheduling::client::SchedulerClient;
 pub use crate::scheduling::server::SchedulerServer;
@@ -15,13 +16,18 @@ use crate::scheduling::executor_actor::{
     spawn_executor_actor,
 };
 
+use crate::scheduling::status_aggregator_actor::{
+    StatusUpdate,
+    spawn_task_status_aggregator_actor,
+};
+
 use crate::scheduling::queue_actor::{
     spawn_queue_actor, QueueActorHandle, QueueOrder, TaskEvent,
 };
 
 use crate::scheduling::cache_actor::{
     spawn_cache_actor, CacheActorHandle, ReadRequest,
-    TaskStatusNotif, WriteRequest,
+    WriteRequest,
 };
 
 use rocket::tokio::sync::mpsc::{unbounded_channel};
@@ -32,6 +38,12 @@ pub fn spawn_actors(
     worker_pool_size: usize,
     cache_size: usize,
 ) {
+    let (status_tx, status_rx) = unbounded_channel::<StatusUpdate>();
+    spawn_task_status_aggregator_actor(
+        hypervisor_socket,
+        status_tx,
+    );
+
     let executor_handle = spawn_executor_actor(pool, hypervisor_socket);
 
     let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
@@ -45,7 +57,6 @@ pub fn spawn_actors(
     let (_order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
 
     let (_read_tx, read_rx) = unbounded_channel::<ReadRequest>();
-    let (_status_tx, status_rx) = unbounded_channel::<TaskStatusNotif>();
 
     spawn_queue_actor(
         executor_handle,

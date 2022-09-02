@@ -1,4 +1,5 @@
-use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, ToSchedulerMsg};
+use crate::models::TaskId;
+use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, MonitorMsg};
 use crate::tasks::handle::TaskHandle;
 use crate::tasks::ipc::Barrier;
 use nix::{
@@ -28,7 +29,8 @@ const WAIT_FOREVER_TIMEOUT: isize = -1;
 pub struct Monitor {
     pub task_barrier: Option<Barrier>,
     pub monitor_ready_barrier: Option<Barrier>,
-    pub task: Pid,
+    pub task_pid: Pid,
+    pub task_id: TaskId,
     pub status: TaskStatus,
     pub handle: TaskHandle,
     pub hypervisor_socket: Option<PathBuf>,
@@ -47,13 +49,13 @@ impl Monitor {
 
     /// Send SIGKILL signal to task process
     fn kill(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        kill(self.task, Some(Signal::SIGKILL))
+        kill(self.task_pid, Some(Signal::SIGKILL))
             .map_err(|e| format!("Can't kill task: {:?}", e).into())
     }
 
     /// Send SIGTERM signal to task process
     fn terminate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        kill(self.task, Some(Signal::SIGTERM))
+        kill(self.task_pid, Some(Signal::SIGTERM))
             .map_err(|e| format!("Can't terminate task: {:?}", e).into())
     }
 
@@ -72,7 +74,7 @@ impl Monitor {
         stream: &mut UnixStream,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.hypervisor_socket = Some(sock);
-        let msg = ToSchedulerMsg::Ok;
+        let msg = MonitorMsg::Ok;
         let _ = msg.send_to(stream)?;
         Ok(())
     }
@@ -80,8 +82,9 @@ impl Monitor {
     /// connect to the hypervisor socket and send a status update
     fn notify_hypervisor(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref hypervisor_socket) = self.hypervisor_socket {
-            let msg = ToSchedulerMsg::StatusUpdate {
+            let msg = MonitorMsg::StatusUpdate {
                 task_handle: self.handle.directory.clone(),
+                task_id: self.task_id,
                 status: self.status.clone(),
                 update_version: self.update_message_count,
             };
@@ -240,13 +243,13 @@ impl Monitor {
             ExecutorQuery::GetStatus => self.send_status(stream)?,
             ExecutorQuery::SetHypervisorSocket(sock) => self.set_hypervisor_socket(sock, stream)?,
             ExecutorQuery::TerminateMonitor => {
-                let msg = ToSchedulerMsg::Ok;
+                let msg = MonitorMsg::Ok;
                 let _ = msg.send_to(stream)?;
                 must_quit = true;
             }
             ExecutorQuery::RequestStatusNotification => {
                 self.notify_hypervisor()?;
-                let msg = ToSchedulerMsg::Ok;
+                let msg = MonitorMsg::Ok;
                 let _ = msg.send_to(stream)?;
             }
             ExecutorQuery::Ok => unreachable!(),

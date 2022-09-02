@@ -3,10 +3,12 @@ use rocket::tokio::{
     self,
     sync::{mpsc::{UnboundedSender, UnboundedReceiver}, oneshot::Sender},
 };
+use crate::models::TaskId;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use super::queue_actor::QueueHandle;
+use super::status_aggregator_actor::StatusUpdate;
 
 type StatusVersion = usize;
 type AccessId = usize;
@@ -18,17 +20,6 @@ pub enum CacheError {
     UnknownTask(TaskId),
     UnknownJob(JobId),
     SendFailed,
-}
-
-/// A status notication,
-/// coming from the monitor processus
-#[derive(Debug)]
-pub enum TaskStatusNotif {
-    HasStatus {
-        task_id: TaskId,
-        status: Status,
-        age: StatusVersion,
-    },
 }
 
 #[derive(PartialEq, Debug)]
@@ -83,9 +74,6 @@ struct Task {
     /// request.
     job: Option<JobId>,
     status: Status,
-    /// Each status update comes with a version number,
-    /// the version is maintained by the monitor process itself
-    version: StatusVersion,
 }
 
 pub struct CacheActor<T> {
@@ -100,7 +88,7 @@ pub struct CacheActor<T> {
 
 impl<T: QueueHandle> CacheActor<T> {
     /// increment the access counter,
-    /// handle overflows by reseting all jobs age
+    /// handle overflows by reseting all jobs last_access
     /// (while keeping the acces order)
     fn increment_access_counter(&mut self) {
         match self.access_counter {
@@ -147,55 +135,39 @@ impl<T: QueueHandle> CacheActor<T> {
         Ok(())
     }
 
-    pub fn handle_status_notication(&mut self, notif: TaskStatusNotif) -> Result<(), CacheError> {
-        match notif {
-            TaskStatusNotif::HasStatus {
-                task_id,
-                status,
-                age,
-            } => {
-                let maybe_job;
-                let is_different;
-                match self.tasks.entry(task_id) {
-                    Entry::Vacant(entry) => {
-                        let task = Task {
-                            status,
-                            version: age,
-                            job: None,
-                        };
-                        entry.insert(task);
+    pub fn handle_status_notication(&mut self, update: StatusUpdate) -> Result<(), CacheError> {
+        let maybe_job;
+        match self.tasks.entry(update.task_id) {
+            Entry::Vacant(entry) => {
+                let task = Task {
+                    status: update.status,
+                    job: None,
+                };
+                entry.insert(task);
 
-                        maybe_job = None;
-                        is_different = true;
-                    }
-                    Entry::Occupied(mut entry) => {
-                        let mut task = entry.get_mut();
-                        task.version = age;
+                maybe_job = None;
+            }
+            Entry::Occupied(mut entry) => {
+                let mut task = entry.get_mut();
 
-                        maybe_job = task.job;
-                        is_different = task.status != status;
-
-                        task.status = status;
-                    }
-                }
-                if is_different {
-                    // warn Queue Actor
-                    match status {
-                        Status::Failed | Status::Killed => {
-                            self.queue_handle.set_task_failed(task_id)
-                        }
-                        Status::Running => self.queue_handle.set_task_started(task_id),
-                        Status::Succeed => self.queue_handle.set_task_succeed(task_id),
-                        _ => eprintln!("Bad status transtition."),
-                    }
-
-                    if let Some(job_id) = maybe_job {
-                        let _ = self.update_job_status(job_id)?;
-                    }
-                    //self.sync_task(task_id);
-                }
+                maybe_job = task.job;
+                task.status = update.status;
             }
         }
+        // warn Queue Actor
+        match update.status {
+            Status::Failed | Status::Killed => {
+                self.queue_handle.set_task_failed(update.task_id)
+            }
+            Status::Running => self.queue_handle.set_task_started(update.task_id),
+            Status::Succeed => self.queue_handle.set_task_succeed(update.task_id),
+            _ => eprintln!("Bad status transtition."),
+        }
+
+        if let Some(job_id) = maybe_job {
+            let _ = self.update_job_status(job_id)?;
+        }
+        //self.sync_task(task_id);
         Ok(())
     }
 
@@ -318,7 +290,6 @@ impl<T: QueueHandle> CacheActor<T> {
             let _ = self.tasks.entry(task_id).or_insert(Task {
                 job: Some(id),
                 status,
-                version: 0,
             });
             task_ids.push(task_id);
         }
@@ -408,7 +379,7 @@ async fn manage_cache<Q: QueueHandle>(
     mut cache_actor: CacheActor<Q>,
     mut read_requests: UnboundedReceiver<ReadRequest>,
     mut write_requests: UnboundedReceiver<WriteRequest>,
-    mut task_notifs: UnboundedReceiver<TaskStatusNotif>,
+    mut task_notifs: UnboundedReceiver<StatusUpdate>,
 ) {
     loop {
         tokio::select! {
@@ -442,7 +413,7 @@ pub fn spawn_cache_actor<Q>(
     queue_handle: Q,
     read_requests: UnboundedReceiver<ReadRequest>,
     write_requests: UnboundedReceiver<WriteRequest>,
-    task_notifs: UnboundedReceiver<TaskStatusNotif>,
+    task_notifs: UnboundedReceiver<StatusUpdate>,
     capacity: usize,
 ) where
     Q: QueueHandle + Send + 'static,
@@ -479,7 +450,7 @@ mod actor_tests {
 
         let (read_tx, read_rx) = unbounded_channel::<ReadRequest>();
         let (write_tx, write_rx) = unbounded_channel::<WriteRequest>();
-        let (status_tx, status_rx) = unbounded_channel::<TaskStatusNotif>();
+        let (status_tx, status_rx) = unbounded_channel::<StatusUpdate>();
 
         spawn_cache_actor(queue, read_rx, write_rx, status_rx, 5);
 
@@ -493,10 +464,9 @@ mod actor_tests {
             .expect("failed to write to cache");
 
         // start task 0
-        let status_update = TaskStatusNotif::HasStatus {
+        let status_update = StatusUpdate::HasStatus {
             task_id: 0,
             status: Status::Running,
-            age: 1,
         };
         let _ = status_tx
             .send(status_update)
