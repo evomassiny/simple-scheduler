@@ -1,5 +1,5 @@
+use crate::messaging::{ExecutorQuery, MonitorMsg, Sendable, TaskStatus};
 use crate::models::TaskId;
-use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, MonitorMsg};
 use crate::tasks::handle::TaskHandle;
 use crate::tasks::ipc::Barrier;
 use nix::{
@@ -34,7 +34,7 @@ pub struct Monitor {
     pub status: TaskStatus,
     pub handle: TaskHandle,
     pub hypervisor_socket: Option<PathBuf>,
-    pub update_message_count: i64,
+    pub update_message_count: usize,
 }
 
 impl Monitor {
@@ -82,7 +82,7 @@ impl Monitor {
     /// connect to the hypervisor socket and send a status update
     fn notify_hypervisor(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref hypervisor_socket) = self.hypervisor_socket {
-            let msg = MonitorMsg::StatusUpdate {
+            let msg = MonitorMsg::StatusBroadcast {
                 task_handle: self.handle.directory.clone(),
                 task_id: self.task_id,
                 status: self.status.clone(),

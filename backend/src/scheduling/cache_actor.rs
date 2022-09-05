@@ -1,9 +1,11 @@
 use crate::models::{JobId, Status, TaskId};
 use rocket::tokio::{
     self,
-    sync::{mpsc::{UnboundedSender, UnboundedReceiver}, oneshot::Sender},
+    sync::{
+        mpsc::{UnboundedReceiver, UnboundedSender},
+        oneshot::Sender,
+    },
 };
-use crate::models::TaskId;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
@@ -156,9 +158,7 @@ impl<T: QueueHandle> CacheActor<T> {
         }
         // warn Queue Actor
         match update.status {
-            Status::Failed | Status::Killed => {
-                self.queue_handle.set_task_failed(update.task_id)
-            }
+            Status::Failed | Status::Killed => self.queue_handle.set_task_failed(update.task_id),
             Status::Running => self.queue_handle.set_task_started(update.task_id),
             Status::Succeed => self.queue_handle.set_task_succeed(update.task_id),
             _ => eprintln!("Bad status transtition."),
@@ -371,7 +371,11 @@ impl CacheWriteHandle for CacheActorHandle {
     }
 
     fn add_job(&self, job: JobId, job_status: Status, tasks: Vec<(TaskId, Status)>) {
-        let _ = self.to_cache.send(WriteRequest::AddExistingJob{ id: job, status: job_status, tasks });
+        let _ = self.to_cache.send(WriteRequest::AddExistingJob {
+            id: job,
+            status: job_status,
+            tasks,
+        });
     }
 }
 
@@ -464,7 +468,7 @@ mod actor_tests {
             .expect("failed to write to cache");
 
         // start task 0
-        let status_update = StatusUpdate::HasStatus {
+        let status_update = StatusUpdate {
             task_id: 0,
             status: Status::Running,
         };

@@ -3,9 +3,7 @@ use super::executor_actor::ExecutorHandle;
 use crate::models::{JobId, TaskId};
 use rocket::tokio::{
     self,
-    sync::{
-        mpsc::{UnboundedReceiver, UnboundedSender},
-    },
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 use std::collections::HashMap;
 
@@ -378,7 +376,7 @@ mod queue_actor_tests {
 
     #[tokio::test]
     async fn test_filling_queue_with_one_task() {
-        use tokio::sync::{mpsc::unbounded_channel};
+        use tokio::sync::mpsc::unbounded_channel;
         // build executor mock-up
         let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
         let (kill_tx, _kill_rx) = unbounded_channel::<TaskId>();
@@ -408,7 +406,7 @@ mod queue_actor_tests {
     #[tokio::test]
     async fn test_canceling_tasks() {
         use tokio::sync::mpsc::error::TryRecvError;
-        use tokio::sync::{mpsc::unbounded_channel};
+        use tokio::sync::mpsc::unbounded_channel;
         // build executor mock-up
         let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
         let (kill_tx, mut kill_rx) = unbounded_channel::<TaskId>();
@@ -468,7 +466,7 @@ mod queue_actor_tests {
         let executor_handle = ExecutorMockUp { spawn_tx, kill_tx };
 
         let store = CacheMockUp {};
-        use tokio::sync::{mpsc::unbounded_channel};
+        use tokio::sync::mpsc::unbounded_channel;
 
         let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
         let (order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
@@ -529,7 +527,7 @@ mod queue_actor_tests {
     async fn test_failure_propagation() {
         use tokio::sync::mpsc::error::TryRecvError;
         let store = CacheMockUp {};
-        use tokio::sync::{mpsc::unbounded_channel};
+        use tokio::sync::mpsc::unbounded_channel;
 
         // build executor mock-up
         let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();

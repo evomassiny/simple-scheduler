@@ -12,25 +12,19 @@ mod status_aggregator_actor;
 pub use crate::scheduling::client::SchedulerClient;
 pub use crate::scheduling::server::SchedulerServer;
 
-use crate::scheduling::executor_actor::{
-    spawn_executor_actor,
-};
+use crate::scheduling::executor_actor::spawn_executor_actor;
 
 use crate::scheduling::status_aggregator_actor::{
-    StatusUpdate,
-    spawn_task_status_aggregator_actor,
+    spawn_task_status_aggregator_actor, StatusUpdate,
 };
 
-use crate::scheduling::queue_actor::{
-    spawn_queue_actor, QueueActorHandle, QueueOrder, TaskEvent,
-};
+use crate::scheduling::queue_actor::{spawn_queue_actor, QueueActorHandle, QueueOrder, TaskEvent};
 
 use crate::scheduling::cache_actor::{
-    spawn_cache_actor, CacheActorHandle, ReadRequest,
-    WriteRequest,
+    spawn_cache_actor, CacheActorHandle, ReadRequest, WriteRequest,
 };
 
-use rocket::tokio::sync::mpsc::{unbounded_channel};
+use rocket::tokio::sync::mpsc::unbounded_channel;
 
 pub fn spawn_actors(
     pool: SqlitePool,
@@ -39,10 +33,7 @@ pub fn spawn_actors(
     cache_size: usize,
 ) {
     let (status_tx, status_rx) = unbounded_channel::<StatusUpdate>();
-    spawn_task_status_aggregator_actor(
-        hypervisor_socket,
-        status_tx,
-    );
+    spawn_task_status_aggregator_actor(hypervisor_socket.clone(), status_tx);
 
     let executor_handle = spawn_executor_actor(pool, hypervisor_socket);
 
