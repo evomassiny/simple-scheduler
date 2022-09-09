@@ -1,7 +1,7 @@
 use crate::messaging::{AsyncSendable, RequestResult, TaskStatus, ToClientMsg, ToSchedulerMsg};
 use crate::models::{Batch, Job, JobId, Status, Task, TaskView};
 use crate::tasks::TaskHandle;
-use rocket::tokio::io::AsyncWriteExt;
+
 use rocket::tokio::sync::mpsc::UnboundedSender;
 use rocket::tokio::{
     self,

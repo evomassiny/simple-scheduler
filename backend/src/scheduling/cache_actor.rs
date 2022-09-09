@@ -125,7 +125,6 @@ impl<T: QueueHandle> CacheActor<T> {
             .collect();
         accesses.sort_by_key(|&(access, _id)| access);
         if let Some((_access, id)) = accesses.first() {
-            // unwrap is safe because the id wa
             let job = self.jobs.remove(id).ok_or(CacheError::UnknownJob(*id))?;
             for task_id in job.tasks {
                 let _task = self

@@ -4,7 +4,7 @@ use crate::messaging::MonitorMsg;
 use crate::messaging::TaskStatus;
 use crate::models::{Status, TaskId};
 use crate::rocket::tokio::io::AsyncWriteExt;
-use rocket::tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use rocket::tokio::sync::mpsc::{UnboundedSender};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::error::Error;
@@ -13,7 +13,6 @@ use std::path::PathBuf;
 use rocket::tokio::{
     self,
     net::{UnixListener, UnixStream},
-    time::Duration,
 };
 
 type Version = usize;
@@ -91,7 +90,7 @@ impl TaskStatusCache {
     }
 
     fn drop_state_in_final_state(&mut self) {
-        let mut tasks: Vec<TaskId> = self
+        let tasks: Vec<TaskId> = self
             .version_age_by_task
             .values()
             .filter_map(|status_date| {
@@ -157,7 +156,7 @@ pub async fn process_monitor_message(
     match msg {
         // update task status from the task monitor
         MonitorMsg::StatusBroadcast {
-            task_handle,
+            task_handle: _,
             task_id,
             status,
             update_version,

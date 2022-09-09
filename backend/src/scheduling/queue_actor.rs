@@ -43,6 +43,12 @@ pub enum QueuedState {
 
 #[derive(Debug)]
 pub enum QueueOrder {
+    SubmitJob {
+        id: JobId,
+        tasks: Vec<TaskId>,
+        /// parent - child dependencies
+        dependencies: Vec<(TaskId, TaskId)>,
+    },
     SubmitTask {
         id: TaskId,
         group: JobId,
@@ -114,6 +120,8 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
 
     pub fn handle_order(&mut self, order: QueueOrder) -> Result<(), QueueError> {
         match order {
+            // TODO:
+            // QueueOrder::SubmitJob
             // insert a new item in the queue
             QueueOrder::SubmitTask {
                 id,
@@ -134,6 +142,37 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
                     children,
                 };
                 self.queue.insert(id, task);
+            }
+            QueueOrder::SubmitJob {
+                id,
+                tasks,
+                dependencies,
+            } => {
+                let priority = tasks.len();
+                // build task index to parent/child ID tables
+                let mut children: HashMap<TaskId, Vec<TaskId>> = HashMap::with_capacity(tasks.len());
+                let mut parents: HashMap<TaskId, Vec<TaskId>> = HashMap::with_capacity(tasks.len());
+                for (parent, child) in &dependencies {
+                    children.entry(&parent).or_insert_with(Vec::new).push(child);
+                    parents.entry(&child).or_insert_with(Vec::new).push(parent);
+                }
+                // insert tasks, one by one
+                for task_id in &tasks {
+                    let state = match parents.get(*task_id) {
+                        Some(task_parents) => QueuedState::AwaitingParents(task_parents),
+                        None => QueuedState::AwaitingSpawning,
+                    };
+                    let task = QueuedTask {
+                        *task_id,
+                        id,
+                        priority,
+                        state,
+                        children.remove(*task_id),
+                    };
+                    self.queue.insert(task_id, task);
+
+                }
+
             }
             // remove Awaiting item in the queue, and all its children.
             // if some task is running, order its murder, but leave it as running

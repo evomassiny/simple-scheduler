@@ -85,7 +85,7 @@ impl Monitor {
             let msg = MonitorMsg::StatusBroadcast {
                 task_handle: self.handle.directory.clone(),
                 task_id: self.task_id,
-                status: self.status.clone(),
+                status: self.status,
                 update_version: self.update_message_count,
             };
             self.update_message_count += 1;
