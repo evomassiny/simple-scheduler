@@ -1,3 +1,15 @@
+//!
+//! The queue_actor is responsible for keeping track of:
+//! * what is the next task to schedule/run
+//! * which task must be canceled because one of its parents failed.
+//!
+//! It reacts from "TaskEvent"s coming from the status cache, 
+//! those are triggered when a change in a task status was observed.
+//!
+//! It also react from "QueueOrder" coming from hypervisor clients,
+//! those are either request to schedule or un-schedule a job.
+//!
+//! When it is tasked to unschedule a job, it warns the status cache about it.
 use super::cache_actor::CacheWriteHandle;
 use super::executor_actor::ExecutorHandle;
 use crate::models::{JobId, TaskId};
@@ -43,20 +55,13 @@ pub enum QueuedState {
 
 #[derive(Debug)]
 pub enum QueueOrder {
-    SubmitJob {
+    AddJobToQueue {
         id: JobId,
         tasks: Vec<TaskId>,
         /// parent - child dependencies
         dependencies: Vec<(TaskId, TaskId)>,
     },
-    SubmitTask {
-        id: TaskId,
-        group: JobId,
-        number_of_task_in_group: usize,
-        children: Option<Vec<TaskId>>,
-        parents: Option<Vec<TaskId>>,
-    },
-    CancelGroup(JobId),
+    RemoveJobFromQueue(JobId),
 }
 
 #[derive(Debug)]
@@ -120,30 +125,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
 
     pub fn handle_order(&mut self, order: QueueOrder) -> Result<(), QueueError> {
         match order {
-            // TODO:
-            // QueueOrder::SubmitJob
-            // insert a new item in the queue
-            QueueOrder::SubmitTask {
-                id,
-                group,
-                children,
-                parents,
-                number_of_task_in_group,
-            } => {
-                let state = match parents {
-                    Some(parents) => QueuedState::AwaitingParents(parents),
-                    None => QueuedState::AwaitingSpawning,
-                };
-                let task = QueuedTask {
-                    id,
-                    group,
-                    priority: number_of_task_in_group,
-                    state,
-                    children,
-                };
-                self.queue.insert(id, task);
-            }
-            QueueOrder::SubmitJob {
+            QueueOrder::AddJobToQueue {
                 id,
                 tasks,
                 dependencies,
@@ -176,7 +158,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
             }
             // remove Awaiting item in the queue, and all its children.
             // if some task is running, order its murder, but leave it as running
-            QueueOrder::CancelGroup(group_id) => {
+            QueueOrder::RemoveJobFromQueue(group_id) => {
                 let mut to_remove = Vec::new();
                 // mark the running one as "AwaitingMurder",
                 // keep track of the awaiting ones
@@ -484,7 +466,7 @@ mod queue_actor_tests {
         let _ = task_sender.send(task_event).expect("status update failed");
 
         // Cancel the job
-        let order = QueueOrder::CancelGroup(0);
+        let order = QueueOrder::RemoveJobFromQueue(0);
         let _ = order_sender.send(order).expect("failed to send task");
 
         // assert that the second one has been killed

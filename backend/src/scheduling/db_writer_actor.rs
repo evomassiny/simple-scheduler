@@ -27,7 +27,7 @@ pub enum WriteRequest {
     /// store a job status
     SetJobStatus { job_id: JobId, status: Status },
     /// add a Job to the database
-    AddJob { job: WorkFlowGraph, user: UserId,  },
+    InsertJob { job: WorkFlowGraph, user: UserId, resp_channel: Sender<Option<JobId>> },
 }
 
 pub struct DBWriterActor {
@@ -69,4 +69,24 @@ impl DBWriterActor {
         // * save status
         todo!();
     }
+}
+
+pub struct DBWriterHandle(UnboundedSender<WriteRequest>);
+
+impl DBWriterHandle {
+    pub async fn save_job(&self, job: WorkFlowGraph, user: UserId) -> Option<JobId> {
+        let (tx, rx) = channel::<Option<JobId>>();
+        self.0.send(
+            WriteRequest::InsertJob {
+                job,
+                user,
+                resp_channel: tx,
+            }
+        );
+        match rx.await {
+            Some(maybe_job) => maybe_job,
+            None => None,
+        }
+    }
+
 }

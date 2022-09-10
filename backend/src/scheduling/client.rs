@@ -24,24 +24,24 @@ impl std::fmt::Display for SchedulerClientError {
 }
 impl std::error::Error for SchedulerClientError {}
 
+type DbWriterHandle = ();
+
 /// Struct handling handling communication
 /// with the scheduler (eg: hypervisor).
 pub struct SchedulerClient {
-    /// absolute path to the UNIX socket the hypervisor is listening on
-    pub socket: PathBuf,
-    pub read_pool: SqlitePool,
-    pub write_pool: SqlitePool,
+    ///// absolute path to the UNIX socket the hypervisor is listening on
+    //pub socket: PathBuf,
+    //pub read_pool: SqlitePool,
+    //pub write_pool: SqlitePool,
+    pub db_writer_handle: DbWriterHandle,
+    pub status_cache_handle: StatusCacheHandle,
+    pub queue_handle: QueueHandle,
 }
 
 impl SchedulerClient {
-    async fn connect_to_scheduler(&self) -> Result<UnixStream, SchedulerClientError> {
-        UnixStream::connect(&self.socket)
-            .await
-            .map_err(|_| SchedulerClientError::SchedulerConnectionError)
-    }
 
     /// parse a workflow file, and submit the parsed job
-    pub async fn submit_workflow(
+    pub async fn _submit_workflow(
         &self,
         workflow_xml: &str,
         user: &User<UserId>,
@@ -63,12 +63,32 @@ impl SchedulerClient {
         Ok(batch.job.id)
     }
 
+    /// parse a workflow file, and submit the parsed job
+    pub async fn submit_workflow(
+        &self,
+        workflow_xml: &str,
+        user: &User<UserId>,
+    ) -> Result<JobId, Box<dyn std::error::Error>> {
+
+        // parse as workflow
+        let graph: WorkFlowGraph = WorkFlowGraph::from_str(workflow_xml)?;
+
+        // save it into the database
+        let job = self.db_writer_handle.save_job(graph, user).await?;
+
+        // schedule it
+        self.queue_handle.add_job(&job).await?;
+        Ok(job.id)
+    }
+
     /// parse a workflow file from uploaded data, then submit it
     pub async fn submit_from_tempfile(
         &self,
         uploaded_file: &mut RocketTempFile<'_>,
         user: &User<UserId>,
     ) -> Result<i64, Box<dyn std::error::Error>> {
+        // TODO: move to workflows::WorkFlowGraph
+
         // first persist the file
         // * use a NamedtempFile to get a free path
         let file = tokio::task::spawn_blocking(NamedTempFile::new)
@@ -133,25 +153,28 @@ impl SchedulerClient {
 
     /// Tells the hypervisor to SIGKILL the job `job_id`
     pub async fn kill_job(&self, job_id: i64) -> Result<(), SchedulerClientError> {
-        let mut to_hypervisor = self
-            .connect_to_scheduler()
-            .await
-            .map_err(|_| SchedulerClientError::SchedulerConnectionError)?;
-        let _ = ToSchedulerMsg::KillJob(job_id)
-            .async_send_to(&mut to_hypervisor)
-            .await
-            .map_err(|_| SchedulerClientError::RequestSendingError)?;
-        let request_result = ToClientMsg::async_read_from(&mut to_hypervisor)
-            .await
-            .map_err(|_| SchedulerClientError::SchedulerConnectionError)?;
-        match request_result {
-            ToClientMsg::RequestResult(rr) => match rr {
-                RequestResult::Ok => Ok(()),
-                RequestResult::Err(error) => Err(SchedulerClientError::KillFailed(error)),
-            },
+        match self.queue_handle.unschedule(job_id).await {
+            Ok(()) => Ok(()),
             _ => Err(SchedulerClientError::KillFailed(
                 "unexpected query result".to_string(),
             )),
+        }
+    }
+    
+    /// 
+    pub async fn get_job_status(&self, job_id: i64) -> Result<(), SchedulerClientError> {
+        match self.status_cache_handle.get_job_status(job_id).await {
+            Some(_) => {
+                todo!();
+                // return job status + tasks statuses
+            },
+            None => {
+                // request status Database
+                // if results: 
+                //      write it to cache (async),
+                // return job status + tasks statuses
+                todo!()
+            }
         }
     }
 }
