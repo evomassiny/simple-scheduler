@@ -1,3 +1,40 @@
+//! 
+//! This crate defines the hypervisor/scheduling part of the app,
+//! it is implemented using the actor model,
+//! each actor being a loop inside of a tokio task.
+//!
+//! The scheduling "server" is made of 5 actors:
+//!              ┌────────────────┐   ┌───────────────┐        ┌───────────┐
+//!              │                │   │               │        │           │
+//!              │                │   │               ├───────►│  Status   │
+//!              │   Executor     │◄──┤     Queue     │        │  Cache    ◄─┐
+//!              │                │   │               │◄───────┤           │ │
+//!              │                │   │               │        │           │ │
+//!              └─────────┬──────┘   └─▲────────▲────┘        └────────┬──┘ │
+//!                        │            │        │                      │    │
+//!                        │            │        │                      │    │
+//!                        │            │        │                      │    │
+//!                        │            │        │              ┌───────▼──┐ │
+//!                        │            │        │              │          │ │
+//! ┌-----------┐    ─-----▼─----┐      │        │              │  DB      │ │
+//! │ Running   │   │  Job       │      │        │              │  Writer  │ │
+//! │ Job       │   │  Monitor   │      │        │              │          │ │
+//! │           ├───►            │      │        │              └───▲┌─────┘ │
+//! └-----------┘   └─-----------┘      │        │                  ││       │
+//!                        │            │        │                  ││       │
+//!                        │            │        │                  ││       │
+//!                        │            │        │       ┌──────────┘▼───────┴─┐
+//!                        │            │        │       │                     │
+//!                        │            │        │       │                     │
+//!                        │            │        │       │                     │
+//!                        │            │        │       │  SCHEDULER CLIENT   │
+//!               ┌────────▼───────┐    │        └───────┤                     │
+//!               │                │    │                │                     │
+//!               │    Status      │    │                │                     │
+//!               │    Aggregator  ├────┘                │                     │
+//!               │                │                     └─────────────────────┘
+//!               └────────────────┘
+//! 
 use sqlx::sqlite::SqlitePool;
 use std::path::PathBuf;
 
@@ -38,7 +75,18 @@ use crate::scheduling::db_writer_actor::{
 
 use rocket::tokio::sync::mpsc::unbounded_channel;
 
-pub fn spawn_actors(
+//!
+//! This function spawn 5 actors, which collaborate to
+//! handle the scheduling of tasks/jobs and the storage of their status.
+//! Together, they are the "hypervisor" of the app.
+//!
+//! The work is split into 5 concurrent actors, communicating
+//! with each other using tokio channels.
+//! 
+//! This function returns a `SchedulerClient`, an handle
+//! to the scheduling actors.
+//! 
+pub fn start_scheduler(
     pool: SqlitePool,
     hypervisor_socket: PathBuf,
     worker_pool_size: usize,

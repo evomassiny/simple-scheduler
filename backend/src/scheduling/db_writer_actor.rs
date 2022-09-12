@@ -73,6 +73,7 @@ impl DbWriterActor {
         task: TaskId,
         status: Status,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("setting {task} to {status:?}");
         let mut conn = self.db_pool.acquire().await?;
         let _ = Task::<TaskId>::set_status(&mut conn, task, &status).await?;
 
@@ -120,35 +121,45 @@ impl DbWriterHandle {
         }
     }
 
-    pub async fn set_task_status(&self, task: TaskId, status: Status) {
-        let _ = self.0.send(WriteRequest::SetTaskStatus {
+    pub fn set_task_status(&self, task: TaskId, status: Status) {
+        if let Err(e) = self.0.send(WriteRequest::SetTaskStatus {
             task_id: task,
             status,
-        });
+        }) {
+            eprintln!("Error while sending write request: {e}");
+        }
     }
 
-    pub async fn set_job_status(&self, job: JobId, status: Status) {
-        let _ = self.0.send(WriteRequest::SetJobStatus {
+    pub fn set_job_status(&self, job: JobId, status: Status) {
+        if let Err(e) = self.0.send(WriteRequest::SetJobStatus {
             job_id: job,
             status,
-        });
+        }) {
+            eprintln!("Error while sending write request: {e}");
+        }
+;
     }
 }
 
 pub fn spawn_db_writer_actor(db_write_pool: SqlitePool) -> DbWriterHandle {
+
     let mut writer_actor = DbWriterActor {
         db_pool: db_write_pool,
     };
     let (to_writer, mut from_handle) = unbounded_channel::<WriteRequest>();
-    let handle = DbWriterHandle(to_writer);
+
     tokio::spawn(async move {
         loop {
             match from_handle.recv().await {
                 Some(WriteRequest::SetTaskStatus { task_id, status }) => {
-                    writer_actor.set_task_status(task_id, status).await;
+                    if let Err(e) = writer_actor.set_task_status(task_id, status).await {
+                        eprintln!("Error while setting state {status:?} for task {task_id}: {e:?}");
+                    }
                 }
                 Some(WriteRequest::SetJobStatus { job_id, status }) => {
-                    writer_actor.set_job_status(job_id, status).await;
+                    if let Err(e) = writer_actor.set_job_status(job_id, status).await {
+                        eprintln!("Error while setting state {status:?} for job {job_id}: {e:?}");
+                    }
                 }
                 // read job insertion request, return the newly inserted job id
                 Some(WriteRequest::InsertJob {
@@ -165,9 +176,11 @@ pub fn spawn_db_writer_actor(db_write_pool: SqlitePool) -> DbWriterHandle {
                         },
                     }
                 }
-                None => break,
+                None => {
+                    continue;
+                },
             };
         }
     });
-    handle
+    DbWriterHandle(to_writer)
 }

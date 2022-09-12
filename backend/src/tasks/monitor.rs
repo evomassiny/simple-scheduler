@@ -43,6 +43,10 @@ impl Monitor {
         if let Some(rel) = self.task_barrier.take() {
             rel.release()?;
             self.status = TaskStatus::Running;
+            // warn hypervisor that the status changed
+            if let Err(e) = self.notify_hypervisor() {
+                eprintln!("Error while trying to notify hypervisor {e:?}");
+            }
         }
         Ok(())
     }

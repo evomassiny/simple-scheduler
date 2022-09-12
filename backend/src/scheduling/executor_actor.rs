@@ -34,14 +34,17 @@ pub struct ExecutorActor {
 impl ExecutorActor {
     /// submit a task
     async fn spawn_task(&self, task: TaskId) -> Result<(), Box<dyn Error>> {
+        println!("executor: spawning {task}");
         let mut read_conn = self.db_read_pool.acquire().await?;
         let commands: Vec<String> = TaskCommandArgs::select_by_task(task, &mut read_conn)
             .await?
             .into_iter()
             .map(|arg| arg.argument)
             .collect();
-        let _handle =
+        let handle =
             TaskHandle::spawn(commands, task, Some(self.hypervisor_socket.clone())).await?;
+        let _ = handle.start().await?;
+        println!("executor: task {task} started");
         Ok(())
     }
 
@@ -66,7 +69,7 @@ impl ExecutorHandle for ExecutorActorHandle {
     }
 
     fn spawn(&mut self, task: TaskId) {
-        let _ = self.to_executor.send(ExecutorMsg::Kill(task));
+        let _ = self.to_executor.send(ExecutorMsg::Spawn(task));
     }
 }
 
@@ -82,9 +85,15 @@ pub fn spawn_executor_actor(
     let handle = ExecutorActorHandle { to_executor };
     tokio::spawn(async move {
         loop {
-            let _ = match from_handle.recv().await {
-                Some(ExecutorMsg::Kill(task)) => executor_actor.kill_task(task).await,
-                Some(ExecutorMsg::Spawn(task)) => executor_actor.spawn_task(task).await,
+            match from_handle.recv().await {
+                Some(ExecutorMsg::Kill(task)) => {
+                    executor_actor.kill_task(task).await;
+                },
+                Some(ExecutorMsg::Spawn(task)) => {
+                    if let Err(e) = executor_actor.spawn_task(task).await {
+                        eprintln!("Error while spawning task: {:?}", &e);
+                    }
+                },
                 None => break,
             };
         }

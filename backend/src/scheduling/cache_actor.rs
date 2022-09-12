@@ -161,6 +161,11 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
                 task.status = update.status;
             }
         }
+        // sync db state
+        println!("requesting setting of task status {}", update.task_id);
+        self.db_writer_handle
+            .set_task_status(update.task_id, update.status);
+
         // warn Queue Actor
         match update.status {
             Status::Failed | Status::Killed => self.queue_handle.set_task_failed(update.task_id),
@@ -168,13 +173,9 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
             Status::Succeed => self.queue_handle.set_task_succeed(update.task_id),
             _ => eprintln!("Bad status transtition."),
         }
-
         if let Some(job_id) = maybe_job {
             let _ = self.update_job_status(job_id)?;
         }
-        // sync db state
-        self.db_writer_handle
-            .set_task_status(update.task_id, update.status);
         Ok(())
     }
 

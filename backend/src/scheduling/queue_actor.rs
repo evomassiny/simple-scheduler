@@ -115,6 +115,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
                 // consider that the task has taken a slot
                 self.busy_workers += 1;
                 // spawn it
+                println!("requesting executor to spawn task {}", *task_id);
                 self.executor_handle.spawn(*task_id);
                 true
             }
@@ -152,6 +153,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
                         priority,
                         state,
                     };
+                    dbg!("Queuing task", *task_id);
                     self.queue.insert(*task_id, task);
 
                 }
@@ -313,7 +315,6 @@ async fn manage_queue<K: ExecutorHandle, S: CacheWriteHandle>(
         }
         // spawn tasks if we can
         'spawn_loop: while queue_actor.has_idle_workers() {
-            //eprintln!("Spawning");
             match queue_actor.spawn_task_to_executor() {
                 Ok(has_spawned_a_task) => {
                     if !has_spawned_a_task {
