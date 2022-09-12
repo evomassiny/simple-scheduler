@@ -19,7 +19,6 @@ pub type TaskId = i64;
 ///       name VARCHAR(256) NOT NULL DEFAULT "",
 ///       handle VARCHAR(512) NOT NULL DEFAULT "",
 ///       status TINYINT NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5, 6)),
-///       last_update_version INTEGER,
 ///       stderr TEXT DEFAULT NULL,
 ///       stdout TEXT DEFAULT NULL,
 ///       job INTEGER,
@@ -37,10 +36,8 @@ pub type TaskId = i64;
 pub struct Task<Id> {
     pub id: Id,
     pub name: String,
-    /// Compeletion status
+    /// Completion status
     pub status: Status,
-    /// last status message version number, (auto incremented by the monitor process)
-    pub last_update_version: Option<i64>,
     /// path to a unix socket (fifo), which can be used to communicate with
     /// the process monitoring this task.
     pub handle: String,
@@ -55,12 +52,11 @@ pub struct Task<Id> {
 impl Task<NewTask> {
     pub async fn save(self, conn: &mut SqliteConnection) -> Result<Task<TaskId>, ModelError> {
         let query_result = sqlx::query(
-            "INSERT INTO tasks (name, status, last_update_version, handle, job) \
-            VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (name, status, handle, job) \
+            VALUES (?, ?, ?, ?)",
         )
         .bind(&self.name)
         .bind(self.status.as_u8())
-        .bind(&self.last_update_version)
         .bind(&self.handle)
         .bind(&self.job)
         .execute(&mut *conn)
@@ -73,7 +69,6 @@ impl Task<NewTask> {
             id,
             name: self.name,
             status: self.status,
-            last_update_version: self.last_update_version,
             handle: self.handle,
             stderr: self.stderr,
             stdout: self.stdout,
@@ -81,17 +76,18 @@ impl Task<NewTask> {
         })
     }
 }
+
+/// Implementation for Existing Tasks
 impl Task<TaskId> {
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(
             "UPDATE tasks \
-            SET name = ?, status = ?, last_update_version = ?, handle = ?, \
+            SET name = ?, status = ?, handle = ?, \
             job = ?, stderr = ?, stdout = ? \
             WHERE id = ?",
         )
         .bind(&self.name)
         .bind(self.status.as_u8())
-        .bind(&self.last_update_version)
         .bind(&self.handle)
         .bind(&self.job)
         .bind(&self.stderr)
@@ -120,58 +116,19 @@ impl Task<TaskId> {
         Ok(())
     }
 
-    /// Compare `new_status_version` to the stored one for the task `task_id`,
-    /// if `new_status_version` is greater of equal, update the task status with `new_status`.
-    ///
-    /// # Note
-    /// This occurs in a single transaction, otherwise we might end up with cached states.
-    ///
-    /// # Return
-    /// return true if the task status was changed.
-    pub async fn try_update_status(
+    /// Set new status for task identified by 'task_id'
+    pub async fn set_status(
         conn: &mut SqliteConnection,
         task_id: TaskId,
-        new_status: &Status,
-        new_status_version: Option<i64>,
-    ) -> Result<bool, ModelError> {
-        let mut transaction = conn
-            .begin()
+        status: &Status,
+    ) -> Result<(), ModelError> {
+        sqlx::query("UPDATE tasks SET status = ? WHERE id = ?")
+            .bind(&status.as_u8())
+            .bind(&task_id)
+            .execute(&mut *conn)
             .await
             .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
-        let row = sqlx::query(
-            "SELECT status, last_update_version \
-            FROM tasks WHERE id = ?",
-        )
-        .bind(&task_id)
-        .fetch_one(&mut transaction)
-        .await
-        .map_err(|_| ModelError::ModelNotFound)?;
-
-        let current_status: u8 = row
-            .try_get("status")
-            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
-        let current_version: Option<i64> = row
-            .try_get("last_update_version")
-            .map_err(|_| ModelError::ColumnError("last_update_version".to_string()))?;
-
-        let mut status_updated = false;
-        if new_status_version.unwrap_or(-1) >= current_version.unwrap_or(-1) {
-            sqlx::query("UPDATE tasks SET status = ?, last_update_version = ? WHERE id = ?")
-                .bind(&new_status.as_u8())
-                .bind(&new_status_version)
-                .bind(&task_id)
-                .execute(&mut transaction)
-                .await
-                .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
-
-            status_updated = new_status.as_u8() != current_status;
-        }
-        transaction
-            .commit()
-            .await
-            .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
-
-        Ok(status_updated)
+        Ok(())
     }
 
     /// Select a Task by its handle
@@ -214,7 +171,7 @@ impl Task<TaskId> {
         conn: &mut SqliteConnection,
     ) -> Result<Self, ModelError> {
         let row = sqlx::query(
-            "SELECT name, status, last_update_version, handle, job, stderr, stdout \
+            "SELECT name, status, handle, job, stderr, stdout \
             FROM tasks WHERE id = ?",
         )
         .bind(&task_id)
@@ -234,9 +191,6 @@ impl Task<TaskId> {
                 .try_get("name")
                 .map_err(|_| ModelError::ColumnError("name".to_string()))?,
             status,
-            last_update_version: row
-                .try_get("last_update_version")
-                .map_err(|_| ModelError::ColumnError("last_update_version".to_string()))?,
             handle: row
                 .try_get("handle")
                 .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
@@ -286,7 +240,7 @@ impl Task<TaskId> {
     ) -> Result<Vec<Self>, ModelError> {
         let mut tasks: Vec<Task<TaskId>> = Vec::new();
         let mut rows = sqlx::query(
-            "SELECT id, name, status, last_update_version, handle, stderr, stdout \
+            "SELECT id, name, status, handle, stderr, stdout \
                 FROM tasks WHERE job = ?",
         )
         .bind(&job_id)
@@ -317,9 +271,6 @@ impl Task<TaskId> {
                     .map_err(|_| ModelError::ColumnError("handle".to_string()))?,
                 job: job_id,
                 status,
-                last_update_version: row
-                    .try_get("last_update_version")
-                    .map_err(|_| ModelError::ColumnError("last_update_version".to_string()))?,
                 stderr: row
                     .try_get("stderr")
                     .map_err(|_| ModelError::ColumnError("stderr".to_string()))?,
@@ -587,7 +538,6 @@ impl TaskCommandArgs<ArgId> {
 pub struct TaskView {
     pub id: TaskId,
     pub status: Status,
-    pub last_update_version: Option<i64>,
     pub handle: TaskHandle,
 }
 impl TaskView {
@@ -598,7 +548,7 @@ impl TaskView {
     ) -> Result<Vec<TaskView>, ModelError> {
         let mut tasks: Vec<TaskView> = Vec::new();
         let mut rows = sqlx::query(
-            "SELECT id, status, last_update_version, handle FROM tasks WHERE status = ?", // 0 => Pending, 5 => Running
+            "SELECT id, status, handle FROM tasks WHERE status = ?", // 0 => Pending, 5 => Running
         )
         .bind(status.as_u8())
         .fetch(&mut *conn);
@@ -629,9 +579,6 @@ impl TaskView {
                     directory: handle_path,
                 },
                 status,
-                last_update_version: row
-                    .try_get("last_update_version")
-                    .map_err(|_| ModelError::ColumnError("last_update_version".to_string()))?,
             });
         }
         Ok(tasks)

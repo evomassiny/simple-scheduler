@@ -53,7 +53,6 @@ impl Batch {
                 id: NewTask,
                 name: graph_task.name.clone(),
                 status: Status::Pending,
-                last_update_version: None,
                 handle: "".to_string(),
                 job: job.id,
                 stdout: None,

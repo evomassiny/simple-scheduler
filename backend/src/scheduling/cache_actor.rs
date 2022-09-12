@@ -1,15 +1,19 @@
 use crate::models::{JobId, Status, TaskId};
-use rocket::tokio::{
-    self,
-    sync::{
-        mpsc::{UnboundedReceiver, UnboundedSender},
-        oneshot::Sender,
+use rocket::{
+    tokio::{
+        self,
+        sync::{
+            mpsc::{UnboundedReceiver, UnboundedSender},
+            oneshot::{channel, Sender},
+        },
     },
+    async_trait,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use super::queue_actor::QueueHandle;
+use super::db_writer_actor::DbWriterHandle;
+use super::queue_actor::QueuedTaskHandle;
 use super::status_aggregator_actor::StatusUpdate;
 
 type StatusVersion = usize;
@@ -82,13 +86,15 @@ pub struct CacheActor<T> {
     queue_handle: T,
     tasks: HashMap<TaskId, Task>,
     jobs: HashMap<JobId, Job>,
+    /// handle to the Database writer handle
+    db_writer_handle: DbWriterHandle,
     /// counter
     access_counter: AccessId,
     /// maximum nb of job entries
     capacity: usize,
 }
 
-impl<T: QueueHandle> CacheActor<T> {
+impl<T: QueuedTaskHandle> CacheActor<T> {
     /// increment the access counter,
     /// handle overflows by reseting all jobs last_access
     /// (while keeping the acces order)
@@ -166,7 +172,9 @@ impl<T: QueueHandle> CacheActor<T> {
         if let Some(job_id) = maybe_job {
             let _ = self.update_job_status(job_id)?;
         }
-        //self.sync_task(task_id);
+        // sync db state
+        self.db_writer_handle
+            .set_task_status(update.task_id, update.status);
         Ok(())
     }
 
@@ -232,6 +240,7 @@ impl<T: QueueHandle> CacheActor<T> {
             }
         }
         job.status = job_status;
+        self.db_writer_handle.set_job_status(job_id, job_status);
         Ok(job_status)
     }
 
@@ -319,6 +328,7 @@ impl<T: QueueHandle> CacheActor<T> {
                     .collect();
                 let _ = self.add_job(id, Status::Pending, tasks)?;
                 let _new_status = self.update_job_status(id)?;
+
                 // TODO!
                 //self.sync_job();
                 //self.sync_task();
@@ -332,8 +342,9 @@ impl<T: QueueHandle> CacheActor<T> {
                     .get_mut(&task_id)
                     .ok_or(CacheError::UnknownTask(task_id))?
                     .status = Status::Canceled;
-                // TODO!
-                //self.sync_task();
+                // sync db state
+                self.db_writer_handle
+                    .set_task_status(task_id, Status::Canceled);
             }
             WriteRequest::CancelJob(job_id) => {
                 let mut job = self
@@ -342,7 +353,9 @@ impl<T: QueueHandle> CacheActor<T> {
                     .ok_or(CacheError::UnknownTask(job_id))?;
                 job.status = Status::Canceled;
                 job.last_access = self.access_counter;
-                //self.sync_job();
+                // sync db state
+                self.db_writer_handle
+                    .set_job_status(job_id, Status::Canceled);
             }
         }
         Ok(())
@@ -357,20 +370,20 @@ pub trait CacheWriteHandle {
 }
 
 /// handle to CacheActor
-pub struct CacheActorHandle {
-    pub to_cache: UnboundedSender<WriteRequest>,
-}
-impl CacheWriteHandle for CacheActorHandle {
+#[derive(Clone)]
+pub struct CacheWriter(pub UnboundedSender<WriteRequest>);
+
+impl CacheWriteHandle for CacheWriter {
     fn cancel_task(&self, task: TaskId) {
-        let _ = self.to_cache.send(WriteRequest::CancelTask(task));
+        let _ = self.0.send(WriteRequest::CancelTask(task));
     }
 
     fn cancel_job(&self, job: JobId) {
-        let _ = self.to_cache.send(WriteRequest::CancelJob(job));
+        let _ = self.0.send(WriteRequest::CancelJob(job));
     }
 
     fn add_job(&self, job: JobId, job_status: Status, tasks: Vec<(TaskId, Status)>) {
-        let _ = self.to_cache.send(WriteRequest::AddExistingJob {
+        let _ = self.0.send(WriteRequest::AddExistingJob {
             id: job,
             status: job_status,
             tasks,
@@ -378,7 +391,34 @@ impl CacheWriteHandle for CacheActorHandle {
     }
 }
 
-async fn manage_cache<Q: QueueHandle>(
+/// trait for interacting with the CacheActor
+#[async_trait]
+pub trait CacheReadHandle {
+    async fn get_job_status(&self, job: JobId) -> Option<(Status, Vec<(TaskId, Status)>)>;
+}
+
+/// handle to CacheActor
+#[derive(Clone)]
+pub struct CacheReader(pub UnboundedSender<ReadRequest>);
+
+#[async_trait]
+impl CacheReadHandle for CacheReader {
+    async fn get_job_status(&self, job: JobId) -> Option<(Status, Vec<(TaskId, Status)>)> {
+        let (tx, rx) = channel::<CacheResponse>();
+        let _ = self.0.send(ReadRequest::GetJob { id: job, from: tx });
+
+        match rx.await {
+            Ok(CacheResponse::JobStatus {
+                id,
+                status,
+                task_statuses,
+            }) => Some((status, task_statuses)),
+            _ => None,
+        }
+    }
+}
+
+async fn manage_cache<Q: QueuedTaskHandle>(
     mut cache_actor: CacheActor<Q>,
     mut read_requests: UnboundedReceiver<ReadRequest>,
     mut write_requests: UnboundedReceiver<WriteRequest>,
@@ -414,15 +454,17 @@ async fn manage_cache<Q: QueueHandle>(
 
 pub fn spawn_cache_actor<Q>(
     queue_handle: Q,
+    db_writer_handle: DbWriterHandle,
     read_requests: UnboundedReceiver<ReadRequest>,
     write_requests: UnboundedReceiver<WriteRequest>,
     task_notifs: UnboundedReceiver<StatusUpdate>,
     capacity: usize,
 ) where
-    Q: QueueHandle + Send + 'static,
+    Q: QueuedTaskHandle + Send + 'static,
 {
     let cache_actor = CacheActor {
         queue_handle,
+        db_writer_handle,
         tasks: HashMap::new(),
         jobs: HashMap::new(),
         access_counter: ACCESS_COUNT_ORIGIN,
@@ -437,11 +479,11 @@ pub fn spawn_cache_actor<Q>(
 mod actor_tests {
     use crate::models::Status;
     use crate::scheduling::cache_actor::*;
-    use crate::scheduling::queue_actor::QueueHandle;
+    use crate::scheduling::queue_actor::QueuedTaskHandle;
     use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
     pub struct QueueMockUp {}
-    impl QueueHandle for QueueMockUp {
+    impl QueuedTaskHandle for QueueMockUp {
         fn set_task_succeed(&self, _task: TaskId) {}
         fn set_task_failed(&self, _task: TaskId) {}
         fn set_task_started(&self, _task: TaskId) {}

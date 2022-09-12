@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS tasks (
       name VARCHAR(256) NOT NULL DEFAULT "",
       handle VARCHAR(512) NOT NULL DEFAULT "",
       status TINYINT NOT NULL DEFAULT 0 CHECK (status in (0, 1, 2, 3, 4, 5, 6)),
-      last_update_version INTEGER,
       stderr TEXT DEFAULT NULL,
       stdout TEXT DEFAULT NULL,
       job INTEGER,

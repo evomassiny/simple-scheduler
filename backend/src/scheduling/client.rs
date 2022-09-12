@@ -1,5 +1,8 @@
+use super::cache_actor::{CacheReadHandle, CacheReader, CacheWriteHandle, CacheWriter};
+use super::db_writer_actor::DbWriterHandle;
+use super::queue_actor::{QueueSubmissionClient, QueueSubmissionHandle};
 use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
-use crate::models::{Batch, JobId, User, UserId};
+use crate::models::{Batch, JobId, Status, TaskId, User, UserId};
 use crate::workflows::WorkFlowGraph;
 use rocket::fs::TempFile as RocketTempFile;
 use rocket::http::ContentType;
@@ -13,7 +16,7 @@ use tempfile::NamedTempFile;
 #[derive(Debug)]
 pub enum SchedulerClientError {
     KillFailed(String),
-    SchedulerConnectionError,
+    JobCreationError,
     RequestSendingError,
     BadInputFile,
 }
@@ -24,61 +27,38 @@ impl std::fmt::Display for SchedulerClientError {
 }
 impl std::error::Error for SchedulerClientError {}
 
-type DbWriterHandle = ();
-
 /// Struct handling handling communication
 /// with the scheduler (eg: hypervisor).
 pub struct SchedulerClient {
     ///// absolute path to the UNIX socket the hypervisor is listening on
     //pub socket: PathBuf,
-    //pub read_pool: SqlitePool,
     //pub write_pool: SqlitePool,
+    pub read_pool: SqlitePool,
     pub db_writer_handle: DbWriterHandle,
-    pub status_cache_handle: StatusCacheHandle,
-    pub queue_handle: QueueHandle,
+    pub status_cache_reader: CacheReader,
+    pub status_cache_writer: CacheWriter,
+    pub submission_handle: QueueSubmissionClient,
 }
 
 impl SchedulerClient {
-
-    /// parse a workflow file, and submit the parsed job
-    pub async fn _submit_workflow(
-        &self,
-        workflow_xml: &str,
-        user: &User<UserId>,
-    ) -> Result<JobId, Box<dyn std::error::Error>> {
-        let mut write_conn = self.write_pool.acquire().await?;
-        // parse as workflow
-        let graph: WorkFlowGraph = WorkFlowGraph::from_str(workflow_xml)?;
-
-        // Save to DB
-        let batch = Batch::from_graph(&graph, user.id, &mut write_conn).await?;
-
-        // warn hypervisor that new jobs are available
-        let mut to_hypervisor = self.connect_to_scheduler().await?;
-        let _ = ToSchedulerMsg::JobAppended
-            .async_send_to(&mut to_hypervisor)
-            .await?;
-
-        // return job id
-        Ok(batch.job.id)
-    }
-
     /// parse a workflow file, and submit the parsed job
     pub async fn submit_workflow(
         &self,
         workflow_xml: &str,
         user: &User<UserId>,
     ) -> Result<JobId, Box<dyn std::error::Error>> {
-
         // parse as workflow
         let graph: WorkFlowGraph = WorkFlowGraph::from_str(workflow_xml)?;
 
         // save it into the database
-        let job = self.db_writer_handle.save_job(graph, user).await?;
+        let (job, tasks, dependencies) = self
+            .db_writer_handle
+            .insert_job(graph, user.id)
+            .await
+            .ok_or(SchedulerClientError::JobCreationError)?;
 
-        // schedule it
-        self.queue_handle.add_job(&job).await?;
-        Ok(job.id)
+        self.submission_handle.add_job_to_queue(job, tasks, dependencies);
+        Ok(job)
     }
 
     /// parse a workflow file from uploaded data, then submit it
@@ -153,24 +133,20 @@ impl SchedulerClient {
 
     /// Tells the hypervisor to SIGKILL the job `job_id`
     pub async fn kill_job(&self, job_id: i64) -> Result<(), SchedulerClientError> {
-        match self.queue_handle.unschedule(job_id).await {
-            Ok(()) => Ok(()),
-            _ => Err(SchedulerClientError::KillFailed(
-                "unexpected query result".to_string(),
-            )),
-        }
+        self.submission_handle.remove_job_from_queue(job_id);
+        Ok(())
     }
-    
-    /// 
+
+    ///
     pub async fn get_job_status(&self, job_id: i64) -> Result<(), SchedulerClientError> {
-        match self.status_cache_handle.get_job_status(job_id).await {
+        match self.status_cache_reader.get_job_status(job_id).await {
             Some(_) => {
                 todo!();
                 // return job status + tasks statuses
-            },
+            }
             None => {
                 // request status Database
-                // if results: 
+                // if results:
                 //      write it to cache (async),
                 // return job status + tasks statuses
                 todo!()

@@ -2,15 +2,14 @@ use sqlx::sqlite::SqlitePool;
 use std::path::PathBuf;
 
 mod client;
-mod server;
 
 mod cache_actor;
 mod executor_actor;
 mod queue_actor;
 mod status_aggregator_actor;
+mod db_writer_actor;
 
 pub use crate::scheduling::client::SchedulerClient;
-pub use crate::scheduling::server::SchedulerServer;
 
 use crate::scheduling::executor_actor::spawn_executor_actor;
 
@@ -18,10 +17,23 @@ use crate::scheduling::status_aggregator_actor::{
     spawn_task_status_aggregator_actor, StatusUpdate,
 };
 
-use crate::scheduling::queue_actor::{spawn_queue_actor, QueueActorHandle, QueueOrder, TaskEvent};
+use crate::scheduling::queue_actor::{
+    spawn_queue_actor,
+    QueuedTaskHandle,
+    QueuedTaskStateClient,
+    QueueSubmissionHandle,
+    QueueSubmissionClient,
+    QueueSubmission, 
+    TaskEvent,
+};
 
 use crate::scheduling::cache_actor::{
-    spawn_cache_actor, CacheActorHandle, ReadRequest, WriteRequest,
+    spawn_cache_actor, ReadRequest, WriteRequest,
+    CacheWriteHandle, CacheWriter, CacheReader, CacheReadHandle,
+};
+
+use crate::scheduling::db_writer_actor::{
+    spawn_db_writer_actor, DbWriterHandle,
 };
 
 use rocket::tokio::sync::mpsc::unbounded_channel;
@@ -31,36 +43,53 @@ pub fn spawn_actors(
     hypervisor_socket: PathBuf,
     worker_pool_size: usize,
     cache_size: usize,
-) {
+) -> SchedulerClient {
+    // database writer actor
+    let db_writer_handle: DbWriterHandle = spawn_db_writer_actor(pool.clone());
+
+    // status aggregator actor
     let (status_tx, status_rx) = unbounded_channel::<StatusUpdate>();
     spawn_task_status_aggregator_actor(hypervisor_socket.clone(), status_tx);
 
-    let executor_handle = spawn_executor_actor(pool, hypervisor_socket);
+    // executor actor
+    let executor_handle = spawn_executor_actor(pool.clone(), hypervisor_socket);
 
-    let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
-    let queue_handle = QueueActorHandle {
-        queue_actor: task_sender,
-    };
+    let (status_sender, status_receiver) = unbounded_channel::<TaskEvent>();
+    let queued_tasks_handle = QueuedTaskStateClient(status_sender);
+
+    let (submission_sender, submission_receiver) = unbounded_channel::<QueueSubmission>();
+    let submission_handle = QueueSubmissionClient(submission_sender);
 
     let (to_cache, from_cache_handle) = unbounded_channel::<WriteRequest>();
-    let cache_writer_handle = CacheActorHandle { to_cache };
+    let cache_writer_handle = CacheWriter(to_cache);
 
-    let (_order_sender, order_receiver) = unbounded_channel::<QueueOrder>();
+    let (read_tx, read_rx) = unbounded_channel::<ReadRequest>();
+    let cache_reader_handle = CacheReader(read_tx);
 
-    let (_read_tx, read_rx) = unbounded_channel::<ReadRequest>();
-
+    // queue actor
     spawn_queue_actor(
         executor_handle,
-        cache_writer_handle,
-        task_receiver,
-        order_receiver,
+        cache_writer_handle.clone(),
+        status_receiver,
+        submission_receiver,
         worker_pool_size,
     );
+    
+    // cache actor
     spawn_cache_actor(
-        queue_handle,
+        queued_tasks_handle.clone(),
+        db_writer_handle.clone(),
         read_rx,
         from_cache_handle,
         status_rx,
         cache_size,
     );
+
+    SchedulerClient {
+        read_pool: pool,
+        db_writer_handle: db_writer_handle,
+        status_cache_writer: cache_writer_handle,
+        status_cache_reader: cache_reader_handle,
+        submission_handle,
+    }
 }

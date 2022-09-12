@@ -15,6 +15,11 @@ The app also keeps track of the status of each job, and is able to retreive thei
 
 
 # Install
+0. assert that sqlite is installed:
+```shell
+sudo apt install libsqlite3-dev sqlite3
+```
+
 1. create empty database
 ```
 cargo install sqlx-cli

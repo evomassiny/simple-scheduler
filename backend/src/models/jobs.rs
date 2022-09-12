@@ -228,6 +228,21 @@ impl Job<JobId> {
         Ok(())
     }
 
+    /// Set new status for job identified by `job_id`
+    pub async fn set_status(
+        conn: &mut SqliteConnection,
+        job_id: JobId,
+        status: &Status,
+    ) -> Result<(), ModelError> {
+        sqlx::query("UPDATE jobs SET status = ? WHERE id = ?")
+            .bind(&status.as_u8())
+            .bind(&job_id)
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
+        Ok(())
+    }
+
     pub async fn task_count(&self, read_conn: &mut SqliteConnection) -> Result<usize, ModelError> {
         let (count,): (u32,) = sqlx::query_as("SELECT COUNT(id) FROM tasks WHERE job = ?")
             .bind(self.id)
