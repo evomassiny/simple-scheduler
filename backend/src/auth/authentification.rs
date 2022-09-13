@@ -43,10 +43,6 @@ pub async fn login(
     cookies: &CookieJar<'_>,
     mut credential: Form<CredentialFileForm<'_>>,
 ) -> (Status, &'static str) {
-    let mut read_conn = match scheduler.inner().read_pool.acquire().await {
-        Ok(conn) => conn,
-        Err(_) => return (Status::BadRequest, "Failed to acquire db handle."),
-    };
 
     let maybe_credential = match credential.read_content().await {
         Ok(content) => key_pair.decode_credentials(&content).ok(),
@@ -54,7 +50,7 @@ pub async fn login(
     };
 
     if let Some(credential) = maybe_credential {
-        match credential.get_user(&mut read_conn).await {
+        match scheduler.get_user_from_credentials(&credential).await {
             Some(user) => {
                 // safe to unwrap because get_user() asserts that user exists.
                 let token = AuthToken::new(user).unwrap();

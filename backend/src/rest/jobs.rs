@@ -28,16 +28,12 @@ pub async fn submit_job(
     mut uploaded_file: Form<WorkflowForm<'_>>,
 ) -> Result<JsonValue, Custom<String>> {
     let scheduler = scheduler.inner();
-    let mut read_conn = scheduler
-        .read_pool
-        .acquire()
-        .await
-        .map_err(|e| Custom(HttpStatus::InternalServerError, e.to_string()))?;
 
-    let user = auth.fetch_user(&mut read_conn).await.ok_or(Custom(
-        HttpStatus::InternalServerError,
-        "unknown user".to_string(),
-    ))?;
+    let user = scheduler
+        .fetch_user(&auth)
+        .await
+        .map_err(|e| Custom(HttpStatus::InternalServerError, "unknown user".to_string()))?;
+    
     // submit job
     let job_id = scheduler
         .submit_from_tempfile(&mut uploaded_file.file, &user)

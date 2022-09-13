@@ -3,6 +3,7 @@ use super::cache_actor::{
 };
 use super::db_writer_actor::DbWriterHandle;
 use super::queue_actor::{QueueSubmissionClient, QueueSubmissionHandle};
+use crate::auth::{AuthToken, Credentials};
 use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
 use crate::models::{Batch, JobId, Status, TaskId, User, UserId};
 use crate::rocket::futures::TryStreamExt;
@@ -22,6 +23,7 @@ pub enum SchedulerClientError {
     KillFailed(String),
     JobCreationError,
     UnknownJob,
+    UnknownUser,
     RequestSendingError,
     BadInputFile,
 }
@@ -35,7 +37,7 @@ impl std::error::Error for SchedulerClientError {}
 /// Struct handling handling communication
 /// with the scheduler (eg: the swarm of actors that compose the hypervisor).
 pub struct SchedulerClient {
-    pub read_pool: SqlitePool,
+    read_pool: SqlitePool,
     db_writer_handle: DbWriterHandle,
     status_cache_reader: CacheReader,
     status_cache_writer: CacheWriter,
@@ -209,5 +211,21 @@ impl SchedulerClient {
                 }
             }
         }
+    }
+
+    /// Parse an AuthToken into a User<UserId> model
+    pub async fn fetch_user(
+        &self,
+        auth: &AuthToken,
+    ) -> Result<User<UserId>, Box<dyn std::error::Error>> {
+        let mut conn = self.read_pool.acquire().await?;
+        auth.fetch_user(&mut conn)
+            .await
+            .ok_or(SchedulerClientError::UnknownUser.into())
+    }
+
+    pub async fn get_user_from_credentials(&self, credentials: &Credentials) -> Option<User<UserId>> {
+        let mut conn = self.read_pool.acquire().await.ok()?;
+        credentials.get_user(&mut conn).await
     }
 }
