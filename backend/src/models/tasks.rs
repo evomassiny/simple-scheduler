@@ -3,7 +3,7 @@ use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
 use crate::tasks::TaskHandle;
 use sqlx::sqlite::SqliteConnection;
-use sqlx::Connection;
+
 use std::path::PathBuf;
 
 /// newly created task, not existing in db yet

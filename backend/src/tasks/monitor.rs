@@ -130,7 +130,7 @@ impl Monitor {
 
         const MAX_RETRY: usize = 100;
         let mut retry_count: usize = 0;
-        while let Err(error) = self.send_msg_to_hypervisor(msg.clone()) {
+        while let Err(_error) = self.send_msg_to_hypervisor(msg.clone()) {
             eprintln!("Failed to warn hypervisor about monitor termination, retrying soon.");
             thread::sleep(time::Duration::from_secs(30));
             retry_count += 1;

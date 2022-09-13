@@ -6,12 +6,12 @@
 //! * writting new workflows into the database
 //!
 
-use crate::models::{Batch, Job, JobId, Status, Task, TaskId, User, UserId};
+use crate::models::{Batch, Job, JobId, Status, Task, TaskId, UserId};
 use crate::workflows::WorkFlowGraph;
 use rocket::tokio::{
     self,
     sync::{
-        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+        mpsc::{unbounded_channel, UnboundedSender},
         oneshot::{channel, Sender},
     },
 };

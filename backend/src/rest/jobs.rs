@@ -1,5 +1,5 @@
 use crate::auth::AuthToken;
-use crate::models::{Job, Status, TaskId};
+use crate::models::{Status, TaskId};
 use crate::scheduling::{SchedulerClient, JobStatusDetail};
 use rocket::{
     form::Form,
@@ -32,7 +32,7 @@ pub async fn submit_job(
     let user = scheduler
         .fetch_user(&auth)
         .await
-        .map_err(|e| Custom(HttpStatus::InternalServerError, "unknown user".to_string()))?;
+        .map_err(|_e| Custom(HttpStatus::InternalServerError, "unknown user".to_string()))?;
     
     // submit job
     let job_id = scheduler

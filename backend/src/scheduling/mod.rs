@@ -47,17 +47,14 @@ use crate::scheduling::status_aggregator_actor::{
 
 use crate::scheduling::queue_actor::{
     spawn_queue_actor,
-    QueuedTaskHandle,
     QueuedTaskStateClient,
-    QueueSubmissionHandle,
     QueueSubmissionClient,
     QueueSubmission, 
     TaskEvent,
 };
 
 use crate::scheduling::cache_actor::{
-    spawn_cache_actor, ReadRequest, WriteRequest,
-    CacheWriteHandle, CacheWriter, CacheReader, CacheReadHandle,
+    spawn_cache_actor, ReadRequest, WriteRequest, CacheWriter, CacheReader,
 };
 
 use crate::scheduling::db_writer_actor::{
@@ -116,7 +113,7 @@ pub fn start_scheduler(
     
     // cache actor
     spawn_cache_actor(
-        queued_tasks_handle.clone(),
+        queued_tasks_handle,
         db_writer_handle.clone(),
         read_rx,
         from_cache_handle,

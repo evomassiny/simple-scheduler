@@ -4,17 +4,17 @@ use super::cache_actor::{
 use super::db_writer_actor::DbWriterHandle;
 use super::queue_actor::{QueueSubmissionClient, QueueSubmissionHandle};
 use crate::auth::{AuthToken, Credentials};
-use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
-use crate::models::{Batch, JobId, Status, TaskId, User, UserId};
+
+use crate::models::{JobId, Status, TaskId, User, UserId};
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
 use crate::workflows::WorkFlowGraph;
 use rocket::fs::TempFile as RocketTempFile;
 use rocket::http::ContentType;
-use rocket::tokio::net::UnixStream;
+
 use rocket::tokio::{self, fs::File, io::AsyncReadExt};
 use sqlx::sqlite::SqlitePool;
-use std::path::PathBuf;
+
 use std::str::FromStr;
 use tempfile::NamedTempFile;
 
@@ -45,6 +45,7 @@ pub struct SchedulerClient {
 }
 
 impl SchedulerClient {
+    /// build a new scheduler client
     pub fn new(
         read_pool: SqlitePool,
         db_writer_handle: DbWriterHandle,
@@ -61,7 +62,7 @@ impl SchedulerClient {
         }
     }
 
-    /// parse a workflow file, and submit the parsed job
+    /// parse a workflow file, and schedule the parsed job
     pub async fn submit_workflow(
         &self,
         workflow_xml: &str,
@@ -82,7 +83,7 @@ impl SchedulerClient {
         Ok(job)
     }
 
-    /// parse a workflow file from uploaded data, then submit it
+    /// parse a workflow file from uploaded data, then schedule it
     pub async fn submit_from_tempfile(
         &self,
         uploaded_file: &mut RocketTempFile<'_>,
@@ -141,7 +142,7 @@ impl SchedulerClient {
                 .await??;
                 unzipped_content
             }
-            Some(content_type) => {
+            Some(_content_type) => {
                 return Err(Box::new(SchedulerClientError::BadInputFile));
             }
             _ => return Err(Box::new(SchedulerClientError::BadInputFile)),
@@ -157,6 +158,7 @@ impl SchedulerClient {
         Ok(())
     }
 
+    /// ask Database for last known state of Job `job_id` and its sibling tasks
     async fn get_job_status_from_db(
         &self,
         job_id: JobId,
@@ -164,7 +166,7 @@ impl SchedulerClient {
         let mut conn = self.read_pool.acquire().await?;
 
         // fetch status for each tasks
-        let mut row = sqlx::query("SELECT status FROM jobs WHERE id = ?")
+        let row = sqlx::query("SELECT status FROM jobs WHERE id = ?")
             .bind(&job_id)
             .fetch_one(&mut conn)
             .await?;
@@ -189,8 +191,8 @@ impl SchedulerClient {
         })
     }
 
-    /// Try to fetch job status from cache, if not present,
-    /// try from the db instead (and update db).
+    /// Try to fetch job status from cache actor, if not present,
+    /// try from the db instead (and update cache).
     pub async fn get_job_status(
         &self,
         job_id: JobId,
@@ -204,7 +206,7 @@ impl SchedulerClient {
                         self.status_cache_writer.add_job(job_status.clone());
                         Ok(job_status)
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         eprintln!("Error while trying to fetch {job_id} status from DB");
                         Err(SchedulerClientError::UnknownJob)
                     }
@@ -224,7 +226,11 @@ impl SchedulerClient {
             .ok_or(SchedulerClientError::UnknownUser.into())
     }
 
-    pub async fn get_user_from_credentials(&self, credentials: &Credentials) -> Option<User<UserId>> {
+    /// Use `credentials` to fetch an existing user from the database
+    pub async fn get_user_from_credentials(
+        &self,
+        credentials: &Credentials,
+    ) -> Option<User<UserId>> {
         let mut conn = self.read_pool.acquire().await.ok()?;
         credentials.get_user(&mut conn).await
     }
