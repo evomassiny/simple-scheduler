@@ -81,8 +81,9 @@ impl TaskStatusCache {
     /// remove old entries and entries that won't change (eg: status of terminated tasks)
     fn garbage_collect(&mut self) {
         if self.version_age_by_task.len() >= self.capacity {
-            // first pass remove task that can't change their status
-            self.drop_state_in_final_state();
+            //// first pass remove task that can't change their status
+            // self.drop_state_in_final_state();
+            
             // second pass remove oldest entries
             while self.version_age_by_task.len() >= self.capacity {
                 self.drop_oldest_entry();
@@ -105,6 +106,10 @@ impl TaskStatusCache {
         for task in tasks {
             self.version_age_by_task.remove(&task);
         }
+    }
+
+    fn drop_entry(&mut self, task: TaskId) {
+        let _ = self.version_age_by_task.remove(&task);
     }
 
     fn drop_oldest_entry(&mut self) {
@@ -157,7 +162,6 @@ pub async fn process_monitor_message(
     match msg {
         // update task status from the task monitor
         MonitorMsg::StatusBroadcast {
-            task_handle: _,
             task_id,
             status,
             update_version,
@@ -180,6 +184,13 @@ pub async fn process_monitor_message(
                 println!("status changed for task {task_id}");
                 job_cache_handle.send(StatusUpdate { task_id, status })?;
             }
+        }
+        MonitorMsg::SuicideNote { task_id } => {
+            // close connection with monitor process
+            let _ = ExecutorQuery::Ok.async_send_to(&mut *stream).await;
+            let _ = stream.shutdown().await;
+            println!("stopping the monitoring of {task_id}");
+            version_cache.drop_entry(task_id);
         }
         MonitorMsg::Ok => { /* nothing to do */ }
     }

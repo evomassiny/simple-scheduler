@@ -28,11 +28,8 @@ impl std::fmt::Display for SchedulerClientError {
 impl std::error::Error for SchedulerClientError {}
 
 /// Struct handling handling communication
-/// with the scheduler (eg: hypervisor).
+/// with the scheduler (eg: the swarm of actors that compose the hypervisor).
 pub struct SchedulerClient {
-    ///// absolute path to the UNIX socket the hypervisor is listening on
-    //pub socket: PathBuf,
-    //pub write_pool: SqlitePool,
     pub read_pool: SqlitePool,
     pub db_writer_handle: DbWriterHandle,
     pub status_cache_reader: CacheReader,
@@ -121,7 +118,6 @@ impl SchedulerClient {
                 unzipped_content
             }
             Some(content_type) => {
-                println!("{:?}", content_type);
                 return Err(Box::new(SchedulerClientError::BadInputFile));
             }
             _ => return Err(Box::new(SchedulerClientError::BadInputFile)),

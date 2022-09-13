@@ -123,6 +123,7 @@ impl TaskHandle {
                                         update_message_count: 0,
                                         handle,
                                         hypervisor_socket: hypervisor_sock,
+                                        update_period_in_sec: 5,
                                     };
 
                                     if let Err(e) = monitor.run() {

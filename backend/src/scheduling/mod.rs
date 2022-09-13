@@ -1,40 +1,30 @@
-//! 
 //! This crate defines the hypervisor/scheduling part of the app,
 //! it is implemented using the actor model,
 //! each actor being a loop inside of a tokio task.
 //!
 //! The scheduling "server" is made of 5 actors:
-//!              ┌────────────────┐   ┌───────────────┐        ┌───────────┐
-//!              │                │   │               │        │           │
-//!              │                │   │               ├───────►│  Status   │
-//!              │   Executor     │◄──┤     Queue     │        │  Cache    ◄─┐
-//!              │                │   │               │◄───────┤           │ │
-//!              │                │   │               │        │           │ │
-//!              └─────────┬──────┘   └─▲────────▲────┘        └────────┬──┘ │
-//!                        │            │        │                      │    │
-//!                        │            │        │                      │    │
-//!                        │            │        │                      │    │
-//!                        │            │        │              ┌───────▼──┐ │
-//!                        │            │        │              │          │ │
-//! ┌-----------┐    ─-----▼─----┐      │        │              │  DB      │ │
-//! │ Running   │   │  Job       │      │        │              │  Writer  │ │
-//! │ Job       │   │  Monitor   │      │        │              │          │ │
-//! │           ├───►            │      │        │              └───▲┌─────┘ │
-//! └-----------┘   └─-----------┘      │        │                  ││       │
-//!                        │            │        │                  ││       │
-//!                        │            │        │                  ││       │
-//!                        │            │        │       ┌──────────┘▼───────┴─┐
-//!                        │            │        │       │                     │
-//!                        │            │        │       │                     │
-//!                        │            │        │       │                     │
-//!                        │            │        │       │  SCHEDULER CLIENT   │
-//!               ┌────────▼───────┐    │        └───────┤                     │
-//!               │                │    │                │                     │
-//!               │    Status      │    │                │                     │
-//!               │    Aggregator  ├────┘                │                     │
-//!               │                │                     └─────────────────────┘
-//!               └────────────────┘
-//! 
+//! * the `Executor` actor, which kills or spawn Jobs upon request from the `Queue` actor
+//! * the `Queue` actor, it keeps tracks of which task must be spawned, and in which order.
+//!   It listens for:
+//!    * (running) task status updates from the "Status Cache" actor
+//!    * scheduling orders (scheduling a new job, or kill another) from the scheduler client,
+//!   Using those channels, it keeps un up-to-date queue of pending tasks, and ask the executor
+//!   to spawn a new one everytime a computing slot becomes idle.
+//! * the `status aggregator` actor: this one listen for status notification from the monitor
+//!   processes (the processes that monitor the runners), 
+//!   Everytime a status changes, it forward the message to the status cache,
+//! * the `status cache actor`: this actor keeps a cached version of jobs and tasks statuses,
+//!   the status are fed by:
+//!   * the status aggregator actor, for tasks that were once started,
+//!   * the queue actor, for tasks that were canceled.
+//!   When a status changes, this actor notify the Database writer, so it can save the current
+//!   state of the concerned task/job.
+//! * the DataBase writer: it is the only part of the app that should write the database,
+//!   this asserts that no concurrent writes happen.
+//!   It can be queried by the status cache (when a task status changes) or by the client,
+//!   when a new job is submitted to the scheduler. This is the actor that assign IDs to
+//!   Tasks/Jobs (through sqlite).
+
 use sqlx::sqlite::SqlitePool;
 use std::path::PathBuf;
 
@@ -75,17 +65,17 @@ use crate::scheduling::db_writer_actor::{
 
 use rocket::tokio::sync::mpsc::unbounded_channel;
 
-//!
-//! This function spawn 5 actors, which collaborate to
-//! handle the scheduling of tasks/jobs and the storage of their status.
-//! Together, they are the "hypervisor" of the app.
-//!
-//! The work is split into 5 concurrent actors, communicating
-//! with each other using tokio channels.
-//! 
-//! This function returns a `SchedulerClient`, an handle
-//! to the scheduling actors.
-//! 
+///
+/// This function spawn 5 actors, which collaborate to
+/// handle the scheduling of tasks/jobs and the storage of their status.
+/// Together, they are the "hypervisor" of the app.
+///
+/// The work is split into 5 concurrent actors, communicating
+/// with each other using tokio channels.
+/// 
+/// This function returns a `SchedulerClient`, an handle
+/// to the scheduling actors.
+/// 
 pub fn start_scheduler(
     pool: SqlitePool,
     hypervisor_socket: PathBuf,

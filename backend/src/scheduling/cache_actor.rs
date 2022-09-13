@@ -162,7 +162,6 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
             }
         }
         // sync db state
-        println!("requesting setting of task status {}", update.task_id);
         self.db_writer_handle
             .set_task_status(update.task_id, update.status);
 

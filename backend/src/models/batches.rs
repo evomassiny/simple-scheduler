@@ -2,6 +2,7 @@ use crate::models::{
     Job, JobId, ModelError, NewJob, NewTask, NewTaskDep, Status, Task, TaskCommandArgs, TaskDepId,
     TaskDependency, TaskId, UserId,
 };
+use crate::tasks::TaskHandle;
 use crate::workflows::WorkFlowGraph;
 use sqlx::sqlite::SqliteConnection;
 use sqlx::Connection;
@@ -49,7 +50,7 @@ impl Batch {
         // create and save all tasks
         let mut tasks: Vec<Task<TaskId>> = Vec::new();
         for graph_task in &workflow.tasks {
-            let task = Task {
+            let mut task = Task {
                 id: NewTask,
                 name: graph_task.name.clone(),
                 status: Status::Pending,
@@ -60,6 +61,12 @@ impl Batch {
             }
             .save(&mut transaction)
             .await?;
+
+            // the handle string depends of the task ID, 
+            // so we must set it in a second step.
+            let handle = TaskHandle::from_task_id(task.id).handle_string();
+            task.handle = handle;
+            task.save(&mut transaction).await?;
 
             // save each of their individual command line args
             let command_args = TaskCommandArgs::from_strings(graph_task.commands(), task.id);

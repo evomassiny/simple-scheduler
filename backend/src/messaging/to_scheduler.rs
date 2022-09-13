@@ -47,13 +47,15 @@ impl TaskStatus {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MonitorMsg {
     StatusBroadcast {
-        task_handle: PathBuf,
         task_id: TaskId,
         status: TaskStatus,
         update_version: usize,
+    },
+    SuicideNote {
+        task_id: TaskId,
     },
     Ok,
 }

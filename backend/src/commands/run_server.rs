@@ -1,7 +1,7 @@
 use crate::auth::{login, KeyPair};
 use crate::config::Config;
 use crate::rest;
-use crate::scheduling::start_hypervisor;
+use crate::scheduling::start_scheduler;
 use rocket::{Build, Rocket};
 use std::path::Path;
 
@@ -17,7 +17,7 @@ pub async fn run_server(rocket: Rocket<Build>, config: &Config) -> Result<(), &'
         .await
         .or(Err("Failed to build read pool."))?;
 
-    let scheduler_client = start_hypervisor(
+    let scheduler_client = start_scheduler(
         read_pool,
         socket_path,
         config.nb_of_workers,
