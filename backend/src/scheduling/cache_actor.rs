@@ -28,15 +28,20 @@ pub enum CacheError {
     SendFailed,
 }
 
+/// status of a Job, and its tasks
+#[derive(PartialEq, Debug, Clone)]
+pub struct JobStatusDetail {
+    pub id: JobId,
+    pub status: Status,
+    pub task_statuses: Vec<(TaskId, Status)>,
+}
+
+
 #[derive(PartialEq, Debug)]
 pub enum CacheResponse {
     /// either a cache miss, of a non-existent JobId
     UnknownJob,
-    JobStatus {
-        id: JobId,
-        status: Status,
-        task_statuses: Vec<(TaskId, Status)>,
-    },
+    JobStatus(JobStatusDetail)
 }
 
 #[derive(Debug)]
@@ -58,11 +63,7 @@ pub enum WriteRequest {
     /// Add new Pending job
     AddNewJob { id: JobId, tasks: Vec<TaskId> },
     /// Add Cache entry from DB (after cache miss)
-    AddExistingJob {
-        id: JobId,
-        status: Status,
-        tasks: Vec<(TaskId, Status)>,
-    },
+    AddExistingJob(JobStatusDetail),
 }
 
 #[derive(Debug)]
@@ -268,11 +269,11 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
                         }
                         // send status
                         let _ = from
-                            .send(CacheResponse::JobStatus {
+                            .send(CacheResponse::JobStatus(JobStatusDetail {
                                 id,
                                 status: job.status,
                                 task_statuses,
-                            })
+                            }))
                             .map_err(|_| CacheError::SendFailed)?;
                     }
                     None => {
@@ -334,8 +335,8 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
                 //self.sync_task();
             }
             // Add an existing Job to the cache
-            WriteRequest::AddExistingJob { id, status, tasks } => {
-                let _ = self.add_job(id, status, tasks)?;
+            WriteRequest::AddExistingJob(JobStatusDetail { id, status, task_statuses }) => {
+                let _ = self.add_job(id, status, task_statuses)?;
             }
             WriteRequest::CancelTask(task_id) => {
                 self.tasks
@@ -366,7 +367,7 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
 pub trait CacheWriteHandle {
     fn cancel_task(&self, task: TaskId);
     fn cancel_job(&self, job: JobId);
-    fn add_job(&self, job: JobId, job_status: Status, tasks: Vec<(TaskId, Status)>);
+    fn add_job(&self, job_status: JobStatusDetail);
 }
 
 /// handle to CacheActor
@@ -382,19 +383,15 @@ impl CacheWriteHandle for CacheWriter {
         let _ = self.0.send(WriteRequest::CancelJob(job));
     }
 
-    fn add_job(&self, job: JobId, job_status: Status, tasks: Vec<(TaskId, Status)>) {
-        let _ = self.0.send(WriteRequest::AddExistingJob {
-            id: job,
-            status: job_status,
-            tasks,
-        });
+    fn add_job(&self, job_status: JobStatusDetail) {
+        let _ = self.0.send(WriteRequest::AddExistingJob(job_status));
     }
 }
 
 /// trait for interacting with the CacheActor
 #[async_trait]
 pub trait CacheReadHandle {
-    async fn get_job_status(&self, job: JobId) -> Option<(Status, Vec<(TaskId, Status)>)>;
+    async fn get_job_status(&self, job: JobId) -> Option<JobStatusDetail>;
 }
 
 /// handle to CacheActor
@@ -403,16 +400,12 @@ pub struct CacheReader(pub UnboundedSender<ReadRequest>);
 
 #[async_trait]
 impl CacheReadHandle for CacheReader {
-    async fn get_job_status(&self, job: JobId) -> Option<(Status, Vec<(TaskId, Status)>)> {
+    async fn get_job_status(&self, job: JobId) -> Option<JobStatusDetail> {
         let (tx, rx) = channel::<CacheResponse>();
         let _ = self.0.send(ReadRequest::GetJob { id: job, from: tx });
 
         match rx.await {
-            Ok(CacheResponse::JobStatus {
-                id,
-                status,
-                task_statuses,
-            }) => Some((status, task_statuses)),
+            Ok(CacheResponse::JobStatus(job_status)) => Some(job_status),
             _ => None,
         }
     }

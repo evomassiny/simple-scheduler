@@ -37,6 +37,7 @@ mod status_aggregator_actor;
 mod db_writer_actor;
 
 pub use crate::scheduling::client::SchedulerClient;
+pub use crate::scheduling::cache_actor::JobStatusDetail;
 
 use crate::scheduling::executor_actor::spawn_executor_actor;
 
@@ -123,11 +124,11 @@ pub fn start_scheduler(
         cache_size,
     );
 
-    SchedulerClient {
-        read_pool: pool,
-        db_writer_handle: db_writer_handle,
-        status_cache_writer: cache_writer_handle,
-        status_cache_reader: cache_reader_handle,
+    SchedulerClient::new(
+        pool,
+        db_writer_handle,
+        cache_reader_handle,
+        cache_writer_handle,
         submission_handle,
-    }
+    )
 }

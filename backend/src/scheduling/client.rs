@@ -1,8 +1,12 @@
-use super::cache_actor::{CacheReadHandle, CacheReader, CacheWriteHandle, CacheWriter};
+use super::cache_actor::{
+    CacheReadHandle, CacheReader, CacheWriteHandle, CacheWriter, JobStatusDetail,
+};
 use super::db_writer_actor::DbWriterHandle;
 use super::queue_actor::{QueueSubmissionClient, QueueSubmissionHandle};
 use crate::messaging::{AsyncSendable, RequestResult, ToClientMsg, ToSchedulerMsg};
 use crate::models::{Batch, JobId, Status, TaskId, User, UserId};
+use crate::rocket::futures::TryStreamExt;
+use crate::sqlx::Row;
 use crate::workflows::WorkFlowGraph;
 use rocket::fs::TempFile as RocketTempFile;
 use rocket::http::ContentType;
@@ -17,6 +21,7 @@ use tempfile::NamedTempFile;
 pub enum SchedulerClientError {
     KillFailed(String),
     JobCreationError,
+    UnknownJob,
     RequestSendingError,
     BadInputFile,
 }
@@ -31,13 +36,29 @@ impl std::error::Error for SchedulerClientError {}
 /// with the scheduler (eg: the swarm of actors that compose the hypervisor).
 pub struct SchedulerClient {
     pub read_pool: SqlitePool,
-    pub db_writer_handle: DbWriterHandle,
-    pub status_cache_reader: CacheReader,
-    pub status_cache_writer: CacheWriter,
-    pub submission_handle: QueueSubmissionClient,
+    db_writer_handle: DbWriterHandle,
+    status_cache_reader: CacheReader,
+    status_cache_writer: CacheWriter,
+    submission_handle: QueueSubmissionClient,
 }
 
 impl SchedulerClient {
+    pub fn new(
+        read_pool: SqlitePool,
+        db_writer_handle: DbWriterHandle,
+        status_cache_reader: CacheReader,
+        status_cache_writer: CacheWriter,
+        submission_handle: QueueSubmissionClient,
+    ) -> Self {
+        Self {
+            read_pool,
+            db_writer_handle,
+            status_cache_reader,
+            status_cache_writer,
+            submission_handle,
+        }
+    }
+
     /// parse a workflow file, and submit the parsed job
     pub async fn submit_workflow(
         &self,
@@ -54,7 +75,8 @@ impl SchedulerClient {
             .await
             .ok_or(SchedulerClientError::JobCreationError)?;
 
-        self.submission_handle.add_job_to_queue(job, tasks, dependencies);
+        self.submission_handle
+            .add_job_to_queue(job, tasks, dependencies);
         Ok(job)
     }
 
@@ -133,19 +155,58 @@ impl SchedulerClient {
         Ok(())
     }
 
-    ///
-    pub async fn get_job_status(&self, job_id: i64) -> Result<(), SchedulerClientError> {
+    async fn get_job_status_from_db(
+        &self,
+        job_id: JobId,
+    ) -> Result<JobStatusDetail, Box<dyn std::error::Error>> {
+        let mut conn = self.read_pool.acquire().await?;
+
+        // fetch status for each tasks
+        let mut row = sqlx::query("SELECT status FROM jobs WHERE id = ?")
+            .bind(&job_id)
+            .fetch_one(&mut conn)
+            .await?;
+        let job_status: Status = Status::from_u8(row.try_get("status")?)?;
+        let mut rows = sqlx::query("SELECT id, status FROM tasks WHERE job = ?")
+            .bind(&job_id)
+            .fetch(&mut conn);
+
+        let mut task_statuses: Vec<(TaskId, Status)> = Vec::new();
+        while let Some(row) = rows.try_next().await? {
+            // fetch name
+            let task_id: TaskId = row.try_get("id")?;
+            // fetch status, build a string from it
+            let status_code: u8 = row.try_get("status")?;
+            let status: Status = Status::from_u8(status_code)?;
+            task_statuses.push((task_id, status));
+        }
+        Ok(JobStatusDetail {
+            id: job_id,
+            status: job_status,
+            task_statuses,
+        })
+    }
+
+    /// Try to fetch job status from cache, if not present,
+    /// try from the db instead (and update db).
+    pub async fn get_job_status(
+        &self,
+        job_id: JobId,
+    ) -> Result<JobStatusDetail, SchedulerClientError> {
         match self.status_cache_reader.get_job_status(job_id).await {
-            Some(_) => {
-                todo!();
-                // return job status + tasks statuses
-            }
+            Some(job_status) => Ok(job_status),
             None => {
-                // request status Database
-                // if results:
-                //      write it to cache (async),
-                // return job status + tasks statuses
-                todo!()
+                match self.get_job_status_from_db(job_id).await {
+                    Ok(job_status) => {
+                        // insert job into cache
+                        self.status_cache_writer.add_job(job_status.clone());
+                        Ok(job_status)
+                    }
+                    Err(e) => {
+                        eprintln!("Error while trying to fetch {job_id} status from DB");
+                        Err(SchedulerClientError::UnknownJob)
+                    }
+                }
             }
         }
     }

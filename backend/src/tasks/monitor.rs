@@ -145,11 +145,12 @@ impl Monitor {
     /// This is the main monitor loop.
     ///
     /// It runs in a single thread while the process is running,
-    /// it listens on a Unix Domain Socket for commands, and quits when the process is terminated.
+    /// it listens on a Unix Domain Socket for commands, and quits when the hypervisor asks it.
     ///
     /// In details, it:
     /// * creates an Unix Domain socket to listen for hypervisor commands (`handle.monitor_socket()`),
-    /// * poll for 2 kind of event: the child termination or connection to the socket
+    /// * creates an Unix timer, to periodically broadcast the monitoree status to the hypervisor
+    /// * poll for 2 kind of event: the child termination or connection to the socket (+ the timer)
     /// * when a connection happens, polls the resulting stream as well
     /// * read data from the stream and interprets it as a command.
     /// * write reponse data into the same stream.
@@ -219,7 +220,11 @@ impl Monitor {
             barrier.release()?;
         }
 
-        // start the event loop:
+        // start the event loop, 4 kinds of events can happen:
+        // * SIGCHLD event => read the signal value and notify the hypervisor
+        // * Timer event: broadcast the last known status to the hypervisor
+        // * a client connection happened on the monitor socket => register the connection fd
+        // * data is ready on a resgistered connection => read the msg and handle it.
         'wait_loop: while let Ok(event_count) =
             epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT)
         // wait for event completion

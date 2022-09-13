@@ -10,7 +10,7 @@
 //! those are either request to schedule or un-schedule a job.
 //!
 //! When it is tasked to unschedule a job, it warns the status cache about it.
-use super::cache_actor::CacheWriteHandle;
+use super::cache_actor::{CacheWriteHandle, JobStatusDetail};
 use super::executor_actor::ExecutorHandle;
 use crate::models::{JobId, TaskId};
 use rocket::tokio::{
