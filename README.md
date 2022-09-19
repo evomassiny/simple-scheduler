@@ -15,31 +15,41 @@ The app also keeps track of the status of each job, and is able to retreive thei
 
 
 # Install
-0. assert that sqlite is installed:
+0. assert that sqlite and rustup are installed:
 ```shell
+# sqlite
 sudo apt install libsqlite3-dev sqlite3
+# rustup
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-1. create empty database
+1. clone the repo
+```
+mkdir -p /opt/simple-scheduler
+cd /opt/simple-scheduler
+git clone https://github.com/evomassiny/simple-scheduler.git
+```
+
+2. create empty database
 ```
 cargo install sqlx-cli
-cd backend
+cd simple-scheduler/backend
 sqlx database create --database-url sqlite:database.sqlite
 sqlx migrate run --database-url sqlite:database.sqlite
 ```
 
-2. create a temporary job directory (for temporary artifacts)
+3. create a temporary job directory (for temporary artifacts)
 ```
 mkdir /opt/simple-scheduler/process-dirs
 ```
 
-3. generate key pairs
+4. generate key pairs
 ```
 utils/gen_key_pair.sh
 mv keys /opt/simple-scheduler/simple-scheduler/keys
 ```
 
-4. create the app configuration file (use `openssl rand -base64 32` to generate your own secret key):
+5. create the app configuration file (use `openssl rand -base64 32` to generate your own secret key):
 ```bash
 cat << EOF > /opt/simple-scheduler/simple-scheduler/backend/Rocket.toml
 [default]
@@ -49,7 +59,7 @@ port = 8000
 
 [release]
 secret_key = "SECRET_KEY"
-database_url = "sqlite:database-prod.sqlite" 
+database_url = "sqlite:database.sqlite" 
 process_directory = "/opt/simple-scheduler/process-dirs"
 hypervisor_socket_path = "/tmp/simple-scheduler.sock"
 public_key_path = "/opt/simple-scheduler/simple-scheduler/keys/pub.key"
@@ -58,13 +68,13 @@ nb_of_workers = 10
 EOF
 ```
 
-5. Add a user with login: "debug-user", pass: "debug-password"
+6. Add a user with login: "debug-user", pass: "debug-password"
 ```
 cargo build --release
 target/release/simple-scheduler create-user debug-user debug-password
 ```
 
-6. Create a systemd unit file to run the scheduler
+7. Create a systemd unit file to run the scheduler
 ```
 sudo su
 cat << EOF > /usr/lib/systemd/system/simple-scheduler.service
@@ -86,7 +96,7 @@ WantedBy=default.target
 EOF
 ```
 
-7. enable and start it:
+8. enable and start it:
 ```bash
 sudo systemctl enable simple-scheduler.service
 sudo systemctl start simple-scheduler.service

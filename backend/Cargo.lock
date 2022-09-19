@@ -30,24 +30,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "aes"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfe0133578c0986e1fe3dfcd4af1cc5b2dd6c3dbf534d69916ce16a2701d40ba"
-dependencies = [
- "cfg-if",
- "cipher 0.4.3",
- "cpufeatures",
-]
-
-[[package]]
 name = "aes-gcm"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df5f85a83a7d8b0442b6aa7b504b8212c1733da07b98aae43d4bc21b2cb3cdf6"
 dependencies = [
  "aead",
- "aes 0.7.5",
+ "aes",
  "cipher 0.3.0",
  "ctr",
  "ghash",
@@ -1862,9 +1851,9 @@ dependencies = [
 
 [[package]]
 name = "simple-scheduler"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
- "aes 0.8.1",
+ "aes",
  "async-trait",
  "base64",
  "bincode",

@@ -1,7 +1,7 @@
 use crate::models::{User, UserId};
 use aes::{
-    cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit},
-    Aes128, Block,
+    cipher::{generic_array::GenericArray, BlockDecrypt},
+    Aes128, Block, NewBlockCipher
 };
 
 use jaded::{FromJava, Parser};
