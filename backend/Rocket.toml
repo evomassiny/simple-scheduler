@@ -14,11 +14,18 @@ public_key_path = "./test-data/authentification/public.rsa.pkcs8.der"
 ## set only when compiled in release mode, i.e, `cargo build --release`
 ## don't use this secret_key! generate your own and keep it private!
 [release]
-port = 8000
-secret_key = "O/9ToubKlU0ad+isM3DxIvHV47Td40IjVaVYEDYtdqE="
-database_url = "sqlite:database-prod.sqlite" 
+database_url = "sqlite:database.sqlite" 
 process_directory = "./processes"
 hypervisor_socket_path = "/tmp/simple-scheduler.sock"
-private_key_path = "./prod-keys/priv.key"
-public_key_path = "./prod-keys/pub.key"
-nb_of_workers = 48
+private_key_path = "./test-data/authentification/private.rsa.pkcs8.der"
+public_key_path = "./test-data/authentification/public.rsa.pkcs8.der"
+port = 8000
+secret_key = "O/9ToubKlU0ad+isM3DxIvHV47Td40IjVaVYEDYtdqE="
+
+#secret_key = "O/9ToubKlU0ad+isM3DxIvHV47Td40IjVaVYEDYtdqE="
+#database_url = "sqlite:database-prod.sqlite" 
+#process_directory = "./processes"
+#hypervisor_socket_path = "/tmp/simple-scheduler.sock"
+#private_key_path = "./prod-keys/priv.key"
+#public_key_path = "./prod-keys/pub.key"
+#nb_of_workers = 48

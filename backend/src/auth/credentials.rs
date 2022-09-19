@@ -3,7 +3,7 @@ use aes::{
     cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit},
     Aes128, Block,
 };
-use base64;
+
 use jaded::{FromJava, Parser};
 use rsa::{pkcs8::FromPrivateKey, PaddingScheme, RsaPrivateKey};
 use sqlx::SqliteConnection;

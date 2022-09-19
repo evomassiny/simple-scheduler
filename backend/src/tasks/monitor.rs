@@ -1,4 +1,5 @@
-use crate::messaging::{ExecutorQuery, Sendable, TaskStatus, ToSchedulerMsg};
+use crate::messaging::{ExecutorQuery, MonitorMsg, Sendable, TaskStatus};
+use crate::models::TaskId;
 use crate::tasks::handle::TaskHandle;
 use crate::tasks::ipc::Barrier;
 use nix::{
@@ -7,8 +8,10 @@ use nix::{
         epoll::{epoll_create, epoll_ctl, epoll_wait, EpollEvent, EpollFlags, EpollOp},
         signal::{kill, SigSet, Signal},
         signalfd::{siginfo, SfdFlags, SignalFd},
+        time::TimeSpec,
+        timerfd::{ClockId, Expiration, TimerFd, TimerFlags, TimerSetTimeFlags},
     },
-    unistd::{close, Pid},
+    unistd::{close, read, Pid},
 };
 use std::io::Read;
 use std::{
@@ -21,6 +24,7 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
+use std::{thread, time};
 
 /// Epoll will wait forever (unless an event happens) if this timeout value is provided
 const WAIT_FOREVER_TIMEOUT: isize = -1;
@@ -28,11 +32,13 @@ const WAIT_FOREVER_TIMEOUT: isize = -1;
 pub struct Monitor {
     pub task_barrier: Option<Barrier>,
     pub monitor_ready_barrier: Option<Barrier>,
-    pub task: Pid,
+    pub task_pid: Pid,
+    pub task_id: TaskId,
     pub status: TaskStatus,
     pub handle: TaskHandle,
     pub hypervisor_socket: Option<PathBuf>,
-    pub update_message_count: i64,
+    pub update_message_count: usize,
+    pub update_period_in_sec: usize,
 }
 
 impl Monitor {
@@ -41,19 +47,23 @@ impl Monitor {
         if let Some(rel) = self.task_barrier.take() {
             rel.release()?;
             self.status = TaskStatus::Running;
+            // warn hypervisor that the status changed
+            if let Err(e) = self.broadcast_monitoree_status() {
+                eprintln!("Error while trying to notify hypervisor {e:?}");
+            }
         }
         Ok(())
     }
 
     /// Send SIGKILL signal to task process
     fn kill(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        kill(self.task, Some(Signal::SIGKILL))
+        kill(self.task_pid, Some(Signal::SIGKILL))
             .map_err(|e| format!("Can't kill task: {:?}", e).into())
     }
 
     /// Send SIGTERM signal to task process
     fn terminate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        kill(self.task, Some(Signal::SIGTERM))
+        kill(self.task_pid, Some(Signal::SIGTERM))
             .map_err(|e| format!("Can't terminate task: {:?}", e).into())
     }
 
@@ -72,19 +82,17 @@ impl Monitor {
         stream: &mut UnixStream,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.hypervisor_socket = Some(sock);
-        let msg = ToSchedulerMsg::Ok;
+        let msg = MonitorMsg::Ok;
         let _ = msg.send_to(stream)?;
         Ok(())
     }
 
     /// connect to the hypervisor socket and send a status update
-    fn notify_hypervisor(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    fn send_msg_to_hypervisor(
+        &mut self,
+        msg: MonitorMsg,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref hypervisor_socket) = self.hypervisor_socket {
-            let msg = ToSchedulerMsg::StatusUpdate {
-                task_handle: self.handle.directory.clone(),
-                status: self.status.clone(),
-                update_version: self.update_message_count,
-            };
             self.update_message_count += 1;
             let hypervisor_socket = hypervisor_socket.clone();
 
@@ -105,14 +113,47 @@ impl Monitor {
         Ok(())
     }
 
+    /// connect to the hypervisor socket and send a status update
+    fn broadcast_monitoree_status(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let msg = MonitorMsg::StatusBroadcast {
+            task_id: self.task_id,
+            status: self.status,
+            update_version: self.update_message_count,
+        };
+        self.send_msg_to_hypervisor(msg)
+    }
+
+    /// connect to the hypervisor socket and send a message
+    /// telling that the monitor process will die.
+    /// (retry after a delay if the communication fails).
+    fn broadcast_suicide(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let msg = MonitorMsg::SuicideNote {
+            task_id: self.task_id,
+        };
+
+        const MAX_RETRY: usize = 100;
+        let mut retry_count: usize = 0;
+        while let Err(_error) = self.send_msg_to_hypervisor(msg.clone()) {
+            eprintln!("Failed to warn hypervisor about monitor termination, retrying soon.");
+            thread::sleep(time::Duration::from_secs(30));
+            retry_count += 1;
+            if retry_count >= MAX_RETRY {
+                eprintln!("Aborting warning hypervisor about monitor termination.");
+                break;
+            }
+        }
+        Ok(())
+    }
+
     /// This is the main monitor loop.
     ///
     /// It runs in a single thread while the process is running,
-    /// it listens on a Unix Domain Socket for commands, and quits when the process is terminated.
+    /// it listens on a Unix Domain Socket for commands, and quits when the hypervisor asks it.
     ///
     /// In details, it:
     /// * creates an Unix Domain socket to listen for hypervisor commands (`handle.monitor_socket()`),
-    /// * poll for 2 kind of event: the child termination or connection to the socket
+    /// * creates an Unix timer, to periodically broadcast the monitoree status to the hypervisor
+    /// * poll for 2 kind of event: the child termination or connection to the socket (+ the timer)
     /// * when a connection happens, polls the resulting stream as well
     /// * read data from the stream and interprets it as a command.
     /// * write reponse data into the same stream.
@@ -134,6 +175,15 @@ impl Monitor {
         let mut sigchild_reader = SignalFd::with_flags(&mask, SfdFlags::SFD_NONBLOCK)?;
         let sigchild_fd: RawFd = sigchild_reader.as_raw_fd();
 
+        // Create a Timerfd
+        let interval = TimeSpec::new(self.update_period_in_sec.try_into()?, 0);
+        let timer = TimerFd::new(ClockId::CLOCK_REALTIME, TimerFlags::TFD_NONBLOCK)?;
+        timer.set(
+            Expiration::Interval(interval),
+            TimerSetTimeFlags::TFD_TIMER_ABSTIME,
+        )?;
+        let timer_fd: RawFd = timer.as_raw_fd();
+
         // setup epoll
         let epoll_fd: RawFd = epoll_create()?;
 
@@ -154,9 +204,17 @@ impl Monitor {
             socket_listener_fd,
             Some(&mut listener_event),
         )?;
+        // register timer fd to epoll
+        let mut timer_event = EpollEvent::new(EpollFlags::EPOLLIN, timer_fd.try_into()?);
+        epoll_ctl(
+            epoll_fd,
+            EpollOp::EpollCtlAdd,
+            timer_fd,
+            Some(&mut timer_event),
+        )?;
 
         // create a empty event array, that we will feed to epoll_wait()
-        let mut events: Vec<EpollEvent> = (0..5).map(|_| EpollEvent::empty()).collect();
+        let mut events: Vec<EpollEvent> = (0..10).map(|_| EpollEvent::empty()).collect();
 
         // stores connection streams
         let mut streams_by_fd: HashMap<RawFd, UnixStream> = HashMap::new();
@@ -167,7 +225,11 @@ impl Monitor {
             barrier.release()?;
         }
 
-        // start the event loop:
+        // start the event loop, 4 kinds of events can happen:
+        // * SIGCHLD event => read the signal value and notify the hypervisor
+        // * Timer event: broadcast the last known status to the hypervisor
+        // * a client connection happened on the monitor socket => register the connection fd
+        // * data is ready on a resgistered connection => read the msg and handle it.
         'wait_loop: while let Ok(event_count) =
             epoll_wait(epoll_fd, &mut events, WAIT_FOREVER_TIMEOUT)
         // wait for event completion
@@ -180,6 +242,15 @@ impl Monitor {
                     fd if fd == sigchild_fd => {
                         if let Err(error) = self.process_child_status(&mut sigchild_reader) {
                             eprintln!("Failed to process SIGCHILD: {:?}", error);
+                        }
+                    }
+                    // the timer ticked
+                    fd if fd == timer_fd => {
+                        // consume the read, so epoll does not re-enter this loop
+                        let mut buff = [0_u8; 8];
+                        let _ = read(timer_fd, &mut buff);
+                        if let Err(error) = self.broadcast_monitoree_status() {
+                            eprintln!("Failed to notify hypervisor of status: {:?}", error);
                         }
                     }
                     // a client connected to the monitor socket
@@ -207,6 +278,13 @@ impl Monitor {
                             Ok(true) => {
                                 // Cleanup whole process directory.
                                 let _ = std::fs::remove_dir_all(&self.handle.directory);
+                                // warn hypervisor about self-termination
+                                if let Err(e) = self.broadcast_suicide() {
+                                    eprintln!(
+                                        "monitor {}: error while broadcasting suicide '{:?}'",
+                                        self.task_id, e
+                                    );
+                                }
                                 break 'wait_loop;
                             }
                             Ok(false) => continue 'process_loop,
@@ -240,13 +318,13 @@ impl Monitor {
             ExecutorQuery::GetStatus => self.send_status(stream)?,
             ExecutorQuery::SetHypervisorSocket(sock) => self.set_hypervisor_socket(sock, stream)?,
             ExecutorQuery::TerminateMonitor => {
-                let msg = ToSchedulerMsg::Ok;
+                let msg = MonitorMsg::Ok;
                 let _ = msg.send_to(stream)?;
                 must_quit = true;
             }
             ExecutorQuery::RequestStatusNotification => {
-                self.notify_hypervisor()?;
-                let msg = ToSchedulerMsg::Ok;
+                self.broadcast_monitoree_status()?;
+                let msg = MonitorMsg::Ok;
                 let _ = msg.send_to(stream)?;
             }
             ExecutorQuery::Ok => unreachable!(),
@@ -274,7 +352,7 @@ impl Monitor {
             _ => TaskStatus::Failed, // assume failure, if nothing is returned
         };
         // notify hypervisor
-        if let Err(error) = self.notify_hypervisor() {
+        if let Err(error) = self.broadcast_monitoree_status() {
             eprintln!(
                 "Failed to send status to hypervisor through socket: '{:?}': '{:?}'",
                 self.hypervisor_socket, error

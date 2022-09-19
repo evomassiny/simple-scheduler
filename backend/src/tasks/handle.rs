@@ -1,4 +1,4 @@
-use crate::messaging::{AsyncSendable, ExecutorQuery, TaskStatus, ToSchedulerMsg};
+use crate::messaging::{AsyncSendable, ExecutorQuery, MonitorMsg, TaskStatus};
 use nix::unistd::Pid;
 use rocket::tokio::{
     fs::{metadata, File},
@@ -162,11 +162,7 @@ impl TaskHandle {
         let _ = ExecutorQuery::Start
             .async_send_to(&mut sock)
             .await
-            .map_err(|_| {
-                "Could not send status request to socket"
-                    .to_string()
-                    .to_string()
-            })?;
+            .map_err(|_| "Could not send status request to socket".to_string())?;
         sock.shutdown().await?;
         Ok(())
     }
@@ -198,7 +194,7 @@ impl TaskHandle {
         if let Ok(_md) = metadata(self.status_file()).await {
             return true;
         }
-        return false;
+        false
     }
 
     /// return the status of the task
@@ -219,10 +215,10 @@ impl TaskHandle {
         ExecutorQuery::SetHypervisorSocket(socket)
             .async_send_to(&mut sock)
             .await?;
-        let response = ToSchedulerMsg::async_read_from(&mut sock).await?;
+        let response = MonitorMsg::async_read_from(&mut sock).await?;
         sock.shutdown().await?;
         match response {
-            ToSchedulerMsg::Ok => Ok(()),
+            MonitorMsg::Ok => Ok(()),
             msg => Err(format!(
                 "Error while re-configuring monitor socket ({:?}), {:?}",
                 &self.directory, &msg
@@ -246,13 +242,12 @@ impl TaskHandle {
             .async_send_to(&mut sock)
             .await
         {
-            dbg!(&e);
             return Err(e);
         }
-        let response = ToSchedulerMsg::async_read_from(&mut sock).await?;
+        let response = MonitorMsg::async_read_from(&mut sock).await?;
         sock.shutdown().await?;
         match response {
-            ToSchedulerMsg::Ok => Ok(()),
+            MonitorMsg::Ok => Ok(()),
             msg => Err(format!(
                 "Error while requesting status for monitor ({:?}), {:?}",
                 &self.directory, &msg
@@ -283,10 +278,10 @@ impl TaskHandle {
             .async_send_to(&mut sock)
             .await?;
         // read ACK
-        let response = ToSchedulerMsg::async_read_from(&mut sock).await?;
-        let e = sock.shutdown().await?;
+        let response = MonitorMsg::async_read_from(&mut sock).await?;
+        let _e = sock.shutdown().await?;
         match response {
-            ToSchedulerMsg::Ok => Ok(()),
+            MonitorMsg::Ok => Ok(()),
             msg => Err(format!(
                 "Error while terminating monitor, ({:?}), {:?}",
                 &self.directory, &msg

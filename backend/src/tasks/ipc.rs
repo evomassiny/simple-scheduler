@@ -26,7 +26,7 @@ impl Barrier {
     ///     }
     ///     // This process monitor the worker process
     ///     ForkResult::Parent { .. } => {
-    ///         println!("B");
+    ///         println!("A");
     ///         let _ = barrier.release().expect("wait failed");
     ///     }
     /// }

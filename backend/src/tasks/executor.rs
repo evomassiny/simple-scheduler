@@ -117,11 +117,13 @@ impl TaskHandle {
                                     let mut monitor = Monitor {
                                         task_barrier: Some(task_barrier),
                                         monitor_ready_barrier: Some(monitor_ready_barrier),
-                                        task: child,
+                                        task_pid: child,
+                                        task_id: id,
                                         status: TaskStatus::Pending,
                                         update_message_count: 0,
                                         handle,
                                         hypervisor_socket: hypervisor_sock,
+                                        update_period_in_sec: 5,
                                     };
 
                                     if let Err(e) = monitor.run() {

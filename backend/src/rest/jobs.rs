@@ -1,6 +1,6 @@
 use crate::auth::AuthToken;
-use crate::models::{Job, Status};
-use crate::scheduling::SchedulerClient;
+use crate::models::{Status, TaskId};
+use crate::scheduling::{JobStatusDetail, SchedulerClient};
 use rocket::{
     form::Form,
     fs::TempFile,
@@ -28,15 +28,12 @@ pub async fn submit_job(
     mut uploaded_file: Form<WorkflowForm<'_>>,
 ) -> Result<JsonValue, Custom<String>> {
     let scheduler = scheduler.inner();
-    let mut read_conn = scheduler
-        .read_pool
-        .acquire()
+
+    let user = scheduler
+        .fetch_user(&auth)
         .await
-        .map_err(|e| Custom(HttpStatus::InternalServerError, e.to_string()))?;
-    let user = auth.fetch_user(&mut read_conn).await.ok_or(Custom(
-        HttpStatus::InternalServerError,
-        "unknown user".to_string(),
-    ))?;
+        .map_err(|_e| Custom(HttpStatus::InternalServerError, "unknown user".to_string()))?;
+
     // submit job
     let job_id = scheduler
         .submit_from_tempfile(&mut uploaded_file.file, &user)
@@ -58,75 +55,43 @@ pub async fn job_status(
 ) -> Result<JsonValue, NotFound<String>> {
     let scheduler = scheduler.inner();
 
-    let mut read_conn = scheduler
-        .read_pool
-        .acquire()
+    let JobStatusDetail {
+        id,
+        status,
+        task_statuses,
+    } = scheduler
+        .get_job_status(job_id)
         .await
         .map_err(|e| NotFound(e.to_string()))?;
 
-    let status: String = Job::get_job_status_by_id(job_id, &mut read_conn)
-        .await
-        .map_err(|e| NotFound(e.to_string()))?
-        .as_proactive_string();
+    let mut pending_count: usize = 0;
+    let mut succeed_count: usize = 0;
+    let mut running_count: usize = 0;
+    let total_count = task_statuses.len();
 
-    let row = sqlx::query(
-        "SELECT COUNT(*) AS total_count, \
-            SUM(CASE WHEN status = ? then 1 ELSE 0 END) as succeed_count, \
-            SUM(CASE WHEN status = ? then 1 ELSE 0 END) as pending_count, \
-            SUM(CASE WHEN status = ? then 1 ELSE 0 END) as running_count \
-            FROM tasks WHERE job = ?",
-    )
-    .bind(Status::Succeed.as_u8())
-    .bind(Status::Pending.as_u8())
-    .bind(Status::Running.as_u8())
-    .bind(&job_id)
-    .fetch_one(&mut read_conn)
-    .await
-    .map_err(|e| NotFound(e.to_string()))?;
-
-    let total_count: i32 = row
-        .try_get("total_count")
-        .map_err(|e| NotFound(e.to_string()))?;
-    let succeed_tasks_count: i32 = row
-        .try_get("succeed_count")
-        .map_err(|e| NotFound(e.to_string()))?;
-    let pending_tasks_count: i32 = row
-        .try_get("pending_count")
-        .map_err(|e| NotFound(e.to_string()))?;
-    let running_tasks_count: i32 = row
-        .try_get("running_count")
-        .map_err(|e| NotFound(e.to_string()))?;
-
-    // fetch status for each tasks
-    let mut rows = sqlx::query("SELECT name, status FROM tasks WHERE job = ?")
-        .bind(&job_id)
-        .fetch(&mut read_conn);
-    let mut task_details: HashMap<String, JsonValue> = HashMap::new();
-
-    while let Some(row) = rows.try_next().await.map_err(|e| NotFound(e.to_string()))? {
-        // fetch name
-        let name: String = row.try_get("name").map_err(|e| NotFound(e.to_string()))?;
-        // fetch status, build a string from it
-        let status_code: u8 = row.try_get("status").map_err(|e| NotFound(e.to_string()))?;
-        let status: String = Status::from_u8(status_code)
-            .map_err(NotFound)?
-            .as_proactive_string();
+    let mut task_details: HashMap<TaskId, JsonValue> = HashMap::new();
+    for (task_id, task_status) in task_statuses {
+        match &task_status {
+            &Status::Succeed => succeed_count += 1,
+            &Status::Pending => pending_count += 1,
+            &Status::Running => running_count += 1,
+            _ => {}
+        }
         task_details.insert(
-            name,
+            task_id,
             json!({
-                    "taskInfo": { "taskStatus": status }
+                    "taskInfo": { "taskStatus": task_status.as_proactive_string() }
             }),
         );
     }
-
     // mimicks proactive API
     Ok(json!({
         "jobInfo": {
-            "jobId": job_id,
-            "status": status,
-            "numberOfFinishedTasks": succeed_tasks_count,
-            "numberOfPendingTasks": pending_tasks_count,
-            "numberOfRunningTasks": running_tasks_count,
+            "jobId": id,
+            "status": status.as_proactive_string(),
+            "numberOfFinishedTasks": succeed_count,
+            "numberOfPendingTasks": pending_count,
+            "numberOfRunningTasks": running_count,
             "totalNumberOfTasks": total_count,
         },
         "tasks": task_details,

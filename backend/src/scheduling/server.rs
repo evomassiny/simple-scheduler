@@ -1,7 +1,7 @@
 use crate::messaging::{AsyncSendable, RequestResult, TaskStatus, ToClientMsg, ToSchedulerMsg};
 use crate::models::{Batch, Job, JobId, Status, Task, TaskView};
 use crate::tasks::TaskHandle;
-use rocket::tokio::io::AsyncWriteExt;
+
 use rocket::tokio::sync::mpsc::UnboundedSender;
 use rocket::tokio::{
     self,
@@ -140,7 +140,7 @@ impl SchedulerServer {
         update_version: Option<i64>,
         work_queue: &UnboundedSender<WorkQueueMsg>,
     ) -> Result<(), Box<dyn Error>> {
-        let status = Status::from_task_status(&task_status);
+        let status = Status::from_task_status(task_status);
 
         let version_updated = {
             let mut write_conn = self
@@ -226,7 +226,7 @@ impl SchedulerServer {
         let non_terminated_tasks =
             TaskView::select_by_status(&Status::Running, &mut *read_conn).await?;
 
-        if non_terminated_tasks.len() > 0 {
+        if !non_terminated_tasks.is_empty() {
             println!(
                 "Found {} unfinished tasks. Requesting status...",
                 non_terminated_tasks.len()
@@ -313,6 +313,7 @@ impl SchedulerServer {
     ) -> Result<(), Box<dyn Error>> {
         let msg = ToSchedulerMsg::async_read_from(stream).await?;
         match msg {
+            /*
             // update task status from the task monitor
             ToSchedulerMsg::StatusUpdate {
                 task_handle,
@@ -331,6 +332,7 @@ impl SchedulerServer {
                     version: update_version,
                 })?;
             }
+            */
             // Update work queue.
             ToSchedulerMsg::JobAppended => {
                 // send update request message to dedicated actor

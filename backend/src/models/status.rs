@@ -1,5 +1,3 @@
-use crate::messaging::TaskStatus;
-
 /// State of job/task
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -20,32 +18,6 @@ pub enum Status {
 }
 
 impl Status {
-    pub fn from_task_status(status: &TaskStatus) -> Self {
-        match *status {
-            TaskStatus::Pending => Self::Pending,
-            TaskStatus::Stopped => Self::Stopped,
-            TaskStatus::Killed => Self::Killed,
-            TaskStatus::Failed => Self::Failed,
-            TaskStatus::Succeed => Self::Succeed,
-            TaskStatus::Running => Self::Running,
-        }
-    }
-
-    pub fn is_failure(&self) -> bool {
-        match *self {
-            Self::Pending => false,
-            Self::Stopped => true,
-            Self::Killed => true,
-            Self::Failed => true,
-            Self::Succeed => false,
-            Self::Running => false,
-            Self::Canceled => true,
-        }
-    }
-
-    pub fn is_pending(&self) -> bool {
-        matches!(*self, Self::Pending)
-    }
 
     pub fn is_finished(&self) -> bool {
         match *self {

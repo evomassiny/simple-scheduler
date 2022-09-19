@@ -1,9 +1,10 @@
+use crate::models::TaskId;
 use rocket::tokio::{fs::File, io::AsyncReadExt};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Represents all the states of a monitoree process
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
     Pending,
     Stopped,
@@ -46,13 +47,22 @@ impl TaskStatus {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum MonitorMsg {
+    StatusBroadcast {
+        task_id: TaskId,
+        status: TaskStatus,
+        update_version: usize,
+    },
+    SuicideNote {
+        task_id: TaskId,
+    },
+    Ok,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ToSchedulerMsg {
-    StatusUpdate {
-        task_handle: PathBuf,
-        status: TaskStatus,
-        update_version: i64,
-    },
+    // TODO: rename
     KillJob(i64),
     JobAppended,
     Ok,

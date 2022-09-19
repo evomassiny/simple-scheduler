@@ -105,7 +105,7 @@ impl User<UserId> {
     }
 
     pub async fn update(&self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
-        let query_result = sqlx::query(
+        let _query_result = sqlx::query(
             "UPDATE users SET name = ? , password_hash = ? \
             WHERE id = ?",
         )
@@ -134,9 +134,9 @@ pub async fn create_or_update_user(
     password: &str,
     conn: &mut SqliteConnection,
 ) -> Result<User<UserId>, String> {
-    match User::<UserId>::get_from_name(&name, &mut *conn).await {
+    match User::<UserId>::get_from_name(name, &mut *conn).await {
         Some(mut user) => {
-            user.password_hash = build_password_hash(&password)
+            user.password_hash = build_password_hash(password)
                 .map_err(|e| format!("Failed to hash new password {:?}", e))?;
 
             user.update(&mut *conn)
@@ -145,7 +145,7 @@ pub async fn create_or_update_user(
             Ok(user)
         }
         None => {
-            let new_user = User::<NewUser>::new(&name, &password)
+            let new_user = User::<NewUser>::new(name, password)
                 .map_err(|e| format!("failed to build user object: {:?}", e))?;
             let user = new_user
                 .create(&mut *conn)

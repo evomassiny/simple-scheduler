@@ -1,12 +1,3 @@
-use sqlx::sqlite::SqliteConnection;
-
-/// Existing (stored in database) model
-pub struct Existing {
-    pub id: i64,
-}
-/// New model
-pub struct New;
-
 #[derive(Debug)]
 pub enum ModelError {
     InvalidTaskId,

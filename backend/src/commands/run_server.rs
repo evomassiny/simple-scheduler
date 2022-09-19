@@ -1,7 +1,7 @@
 use crate::auth::{login, KeyPair};
 use crate::config::Config;
 use crate::rest;
-use crate::scheduling::SchedulerServer;
+use crate::scheduling::start_scheduler;
 use rocket::{Build, Rocket};
 use std::path::Path;
 
@@ -13,19 +13,11 @@ pub async fn run_server(rocket: Rocket<Build>, config: &Config) -> Result<(), &'
     let socket_path = Path::new(&config.hypervisor_socket_path).to_path_buf();
 
     let read_pool = config
-        .database_read_pool()
+        .database_pool()
         .await
         .or(Err("Failed to build read pool."))?;
 
-    let write_pool = config
-        .database_write_pool()
-        .await
-        .or(Err("Failed to build write pool."))?;
-
-    let scheduler_server =
-        SchedulerServer::new(socket_path, read_pool, write_pool, config.nb_of_workers);
-    let scheduler_client = scheduler_server.client();
-    scheduler_server.start();
+    let scheduler_client = start_scheduler(read_pool, socket_path, config.nb_of_workers, 1024);
 
     // Load RSA key pair (for auth)
     let key_pair = KeyPair::load_from(&config.public_key_path, &config.private_key_path)
