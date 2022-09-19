@@ -1,7 +1,7 @@
 use crate::models::TaskId;
 use rocket::tokio::{fs::File, io::AsyncReadExt};
 use serde::{Deserialize, Serialize};
-use std::path::{Path};
+use std::path::Path;
 
 /// Represents all the states of a monitoree process
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]

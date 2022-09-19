@@ -78,6 +78,15 @@ impl SchedulerClient {
             .await
             .ok_or(SchedulerClientError::JobCreationError)?;
 
+        // Add job to cache (not mandatory)
+        let job_status = JobStatusDetail {
+            id: job,
+            status: Status::Pending,
+            task_statuses: tasks.iter().map(|id| (*id, Status::Pending)).collect(),
+        };
+        self.status_cache_writer.add_job(job_status);
+
+        // schedule job
         self.submission_handle
             .add_job_to_queue(job, tasks, dependencies);
         Ok(job)

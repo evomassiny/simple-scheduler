@@ -17,12 +17,7 @@ pub async fn run_server(rocket: Rocket<Build>, config: &Config) -> Result<(), &'
         .await
         .or(Err("Failed to build read pool."))?;
 
-    let scheduler_client = start_scheduler(
-        read_pool,
-        socket_path,
-        config.nb_of_workers,
-        1024,
-    );
+    let scheduler_client = start_scheduler(read_pool, socket_path, config.nb_of_workers, 1024);
 
     // Load RSA key pair (for auth)
     let key_pair = KeyPair::load_from(&config.public_key_path, &config.private_key_path)

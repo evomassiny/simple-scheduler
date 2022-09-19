@@ -1,6 +1,6 @@
 use crate::auth::AuthToken;
 use crate::models::{Status, TaskId};
-use crate::scheduling::{SchedulerClient, JobStatusDetail};
+use crate::scheduling::{JobStatusDetail, SchedulerClient};
 use rocket::{
     form::Form,
     fs::TempFile,
@@ -33,7 +33,7 @@ pub async fn submit_job(
         .fetch_user(&auth)
         .await
         .map_err(|_e| Custom(HttpStatus::InternalServerError, "unknown user".to_string()))?;
-    
+
     // submit job
     let job_id = scheduler
         .submit_from_tempfile(&mut uploaded_file.file, &user)
@@ -45,7 +45,6 @@ pub async fn submit_job(
     }))
 }
 
-
 /// return status of jobs and related task
 /// (agglomerated sum of running, pending and succeed task).
 #[get("/jobs/<job_id>")]
@@ -56,7 +55,12 @@ pub async fn job_status(
 ) -> Result<JsonValue, NotFound<String>> {
     let scheduler = scheduler.inner();
 
-    let JobStatusDetail { id, status, task_statuses } = scheduler.get_job_status(job_id)
+    let JobStatusDetail {
+        id,
+        status,
+        task_statuses,
+    } = scheduler
+        .get_job_status(job_id)
         .await
         .map_err(|e| NotFound(e.to_string()))?;
 
@@ -68,10 +72,10 @@ pub async fn job_status(
     let mut task_details: HashMap<TaskId, JsonValue> = HashMap::new();
     for (task_id, task_status) in task_statuses {
         match &task_status {
-           &Status::Succeed => succeed_count += 1, 
-           &Status::Pending => pending_count += 1, 
-           &Status::Running => running_count += 1, 
-           _ => {}
+            &Status::Succeed => succeed_count += 1,
+            &Status::Pending => pending_count += 1,
+            &Status::Running => running_count += 1,
+            _ => {}
         }
         task_details.insert(
             task_id,

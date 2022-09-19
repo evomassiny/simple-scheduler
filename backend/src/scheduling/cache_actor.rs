@@ -1,5 +1,6 @@
 use crate::models::{JobId, Status, TaskId};
 use rocket::{
+    async_trait,
     tokio::{
         self,
         sync::{
@@ -7,7 +8,6 @@ use rocket::{
             oneshot::{channel, Sender},
         },
     },
-    async_trait,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -16,7 +16,6 @@ use super::db_writer_actor::DbWriterHandle;
 use super::queue_actor::QueuedTaskHandle;
 use super::status_aggregator_actor::StatusUpdate;
 
-type StatusVersion = usize;
 type AccessId = usize;
 
 pub const ACCESS_COUNT_ORIGIN: usize = 0;
@@ -36,16 +35,15 @@ pub struct JobStatusDetail {
     pub task_statuses: Vec<(TaskId, Status)>,
 }
 
-
 #[derive(PartialEq, Debug)]
 pub enum CacheResponse {
     /// either a cache miss, of a non-existent JobId
     UnknownJob,
-    JobStatus(JobStatusDetail)
+    JobStatus(JobStatusDetail),
 }
 
 #[derive(Debug)]
-pub enum ReadRequest {
+pub enum CacheReadRequest {
     /// ask for the status of a Job
     GetJob {
         id: JobId,
@@ -54,14 +52,12 @@ pub enum ReadRequest {
 }
 
 #[derive(Debug)]
-pub enum WriteRequest {
+pub enum CacheWriteRequest {
     /// Cancel a task (maybe its parent failed)
     CancelTask(TaskId),
     /// Cancel a job (children cancellation must
     /// be handled with `CancelTask` requests
     CancelJob(JobId),
-    /// Add new Pending job
-    AddNewJob { id: JobId, tasks: Vec<TaskId> },
     /// Add Cache entry from DB (after cache miss)
     AddExistingJob(JobStatusDetail),
 }
@@ -83,13 +79,16 @@ struct Task {
     status: Status,
 }
 
+/// State associated with the cache actor,
+/// basically an LRU cache for job and tasks statuses.
 pub struct CacheActor<T> {
     queue_handle: T,
     tasks: HashMap<TaskId, Task>,
     jobs: HashMap<JobId, Job>,
     /// handle to the Database writer handle
     db_writer_handle: DbWriterHandle,
-    /// counter
+    /// counter, we use it to
+    /// quantify the "age" of each cache entry
     access_counter: AccessId,
     /// maximum nb of job entries
     capacity: usize,
@@ -171,6 +170,7 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
             Status::Failed | Status::Killed => self.queue_handle.set_task_failed(update.task_id),
             Status::Running => self.queue_handle.set_task_started(update.task_id),
             Status::Succeed => self.queue_handle.set_task_succeed(update.task_id),
+            Status::Pending => {}
             _ => eprintln!("Bad status transtition."),
         }
         if let Some(job_id) = maybe_job {
@@ -245,13 +245,13 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
         Ok(job_status)
     }
 
-    pub fn handle_read_request(&mut self, request: ReadRequest) -> Result<(), CacheError> {
+    pub fn handle_read_request(&mut self, request: CacheReadRequest) -> Result<(), CacheError> {
         self.increment_access_counter();
         match request {
             // Request for the status of a Job,
             // Return `CacheResponse::JobStatus {..}` if we now about it,
             // `CacheResponse::UnknownJob` otherwise.
-            ReadRequest::GetJob { id, from } => {
+            CacheReadRequest::GetJob { id, from } => {
                 match self.jobs.get_mut(&id) {
                     Some(mut job) => {
                         job.last_access = self.access_counter;
@@ -287,6 +287,7 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
         Ok(())
     }
 
+    /// Add a job and its tasks to the cache.
     fn add_job(
         &mut self,
         id: JobId,
@@ -318,27 +319,18 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
         Ok(())
     }
 
-    pub fn handle_write_request(&mut self, request: WriteRequest) -> Result<(), CacheError> {
+    pub fn handle_write_request(&mut self, request: CacheWriteRequest) -> Result<(), CacheError> {
         self.increment_access_counter();
         match request {
-            // Add a new (pending) Job to the cache
-            WriteRequest::AddNewJob { id, tasks } => {
-                let tasks = tasks
-                    .iter()
-                    .map(|task_id| (*task_id, Status::Pending))
-                    .collect();
-                let _ = self.add_job(id, Status::Pending, tasks)?;
-                let _new_status = self.update_job_status(id)?;
-
-                // TODO!
-                //self.sync_job();
-                //self.sync_task();
-            }
             // Add an existing Job to the cache
-            WriteRequest::AddExistingJob(JobStatusDetail { id, status, task_statuses }) => {
+            CacheWriteRequest::AddExistingJob(JobStatusDetail {
+                id,
+                status,
+                task_statuses,
+            }) => {
                 let _ = self.add_job(id, status, task_statuses)?;
             }
-            WriteRequest::CancelTask(task_id) => {
+            CacheWriteRequest::CancelTask(task_id) => {
                 self.tasks
                     .get_mut(&task_id)
                     .ok_or(CacheError::UnknownTask(task_id))?
@@ -347,7 +339,7 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
                 self.db_writer_handle
                     .set_task_status(task_id, Status::Canceled);
             }
-            WriteRequest::CancelJob(job_id) => {
+            CacheWriteRequest::CancelJob(job_id) => {
                 let mut job = self
                     .jobs
                     .get_mut(&job_id)
@@ -372,20 +364,21 @@ pub trait CacheWriteHandle {
 
 /// handle to CacheActor
 #[derive(Clone)]
-pub struct CacheWriter(pub UnboundedSender<WriteRequest>);
+pub struct CacheWriter(pub UnboundedSender<CacheWriteRequest>);
 
 impl CacheWriteHandle for CacheWriter {
     fn cancel_task(&self, task: TaskId) {
-        let _ = self.0.send(WriteRequest::CancelTask(task));
+        let _ = self.0.send(CacheWriteRequest::CancelTask(task));
     }
 
     fn cancel_job(&self, job: JobId) {
-        let _ = self.0.send(WriteRequest::CancelJob(job));
+        let _ = self.0.send(CacheWriteRequest::CancelJob(job));
     }
 
     fn add_job(&self, job_status: JobStatusDetail) {
-        let _ = self.0.send(WriteRequest::AddExistingJob(job_status));
+        let _ = self.0.send(CacheWriteRequest::AddExistingJob(job_status));
     }
+
 }
 
 /// trait for interacting with the CacheActor
@@ -396,13 +389,13 @@ pub trait CacheReadHandle {
 
 /// handle to CacheActor
 #[derive(Clone)]
-pub struct CacheReader(pub UnboundedSender<ReadRequest>);
+pub struct CacheReader(pub UnboundedSender<CacheReadRequest>);
 
 #[async_trait]
 impl CacheReadHandle for CacheReader {
     async fn get_job_status(&self, job: JobId) -> Option<JobStatusDetail> {
         let (tx, rx) = channel::<CacheResponse>();
-        let _ = self.0.send(ReadRequest::GetJob { id: job, from: tx });
+        let _ = self.0.send(CacheReadRequest::GetJob { id: job, from: tx });
 
         match rx.await {
             Ok(CacheResponse::JobStatus(job_status)) => Some(job_status),
@@ -411,51 +404,29 @@ impl CacheReadHandle for CacheReader {
     }
 }
 
-async fn manage_cache<Q: QueuedTaskHandle>(
-    mut cache_actor: CacheActor<Q>,
-    mut read_requests: UnboundedReceiver<ReadRequest>,
-    mut write_requests: UnboundedReceiver<WriteRequest>,
-    mut task_notifs: UnboundedReceiver<StatusUpdate>,
-) {
-    loop {
-        tokio::select! {
-           // this asserts that futures are polled in order, eg
-           // it introduce a priority 'writes from queue' > 'writes from monitors' > 'read request'
-           biased;
-           Some(write_request) = write_requests.recv() => {
-                match cache_actor.handle_write_request(write_request) {
-                    Ok(_) => {},
-                    Err(error) => eprintln!("Cache actor failed while processing write: {:?}", error)
-                }
-           },
-           Some(status_notification) = task_notifs.recv() => {
-                match cache_actor.handle_status_notication(status_notification) {
-                    Ok(_) => {},
-                    Err(error) => eprintln!("Cache actor failed while processing status notif: {:?}", error)
-                }
-           },
-           Some(read_request) = read_requests.recv() => {
-                match cache_actor.handle_read_request(read_request) {
-                    Ok(_) => {},
-                    Err(error) => eprintln!("Cache actor failed while processing read: {:?}", error)
-                }
-           },
-           else => break
-        }
-    }
-}
-
+/// Spawn an actor responsible for keeping track of the
+/// status of jobs and tasks.
+///
+/// This cache acts as a least recently used (LRU) cache,
+/// when its capacity is reached, the least recently used
+/// entry is dropped.
+///
+/// Every change in a Job/Task should be registered to this actor using the
+/// UnboundedSender<CacheWriteRequest> paired with `write_requests`,
+/// this is actor is reponsible for forwarding the "write order" to the `db_writer_actor`.
+///
 pub fn spawn_cache_actor<Q>(
     queue_handle: Q,
     db_writer_handle: DbWriterHandle,
-    read_requests: UnboundedReceiver<ReadRequest>,
-    write_requests: UnboundedReceiver<WriteRequest>,
-    task_notifs: UnboundedReceiver<StatusUpdate>,
+    mut read_requests: UnboundedReceiver<CacheReadRequest>,
+    mut write_requests: UnboundedReceiver<CacheWriteRequest>,
+    mut status_notifications: UnboundedReceiver<StatusUpdate>,
     capacity: usize,
 ) where
     Q: QueuedTaskHandle + Send + 'static,
 {
-    let cache_actor = CacheActor {
+    // actor state
+    let mut cache_actor = CacheActor {
         queue_handle,
         db_writer_handle,
         tasks: HashMap::new(),
@@ -463,17 +434,48 @@ pub fn spawn_cache_actor<Q>(
         access_counter: ACCESS_COUNT_ORIGIN,
         capacity,
     };
+
     tokio::spawn(async move {
-        manage_cache(cache_actor, read_requests, write_requests, task_notifs).await
+        loop {
+            tokio::select! {
+               // this asserts that futures are polled in order, eg
+               // it introduce a priority 'writes from queue' > 'writes from monitors' > 'read request'
+               biased;
+               Some(write_request) = write_requests.recv() => {
+                    match cache_actor.handle_write_request(write_request) {
+                        Ok(_) => {},
+                        Err(error) => eprintln!("Cache actor failed while processing write: {:?}", error)
+                    }
+               },
+               Some(status_notification) = status_notifications.recv() => {
+                    match cache_actor.handle_status_notication(status_notification) {
+                        Ok(_) => {},
+                        Err(error) => eprintln!("Cache actor failed while processing status notif: {:?}", error)
+                    }
+               },
+               Some(read_request) = read_requests.recv() => {
+                    match cache_actor.handle_read_request(read_request) {
+                        Ok(_) => {},
+                        Err(error) => eprintln!("Cache actor failed while processing read: {:?}", error)
+                    }
+               },
+               else => break
+            }
+        }
     });
 }
 
 #[cfg(test)]
 mod actor_tests {
-    use crate::models::Status;
-    use crate::scheduling::cache_actor::*;
+    use crate::models::{Status, TaskId};
+    use crate::scheduling::cache_actor::{
+        spawn_cache_actor, CacheReadRequest, CacheResponse, CacheWriteRequest, JobStatusDetail,
+    };
+    use crate::scheduling::db_writer_actor::{DbWriteRequest, DbWriterHandle};
     use crate::scheduling::queue_actor::QueuedTaskHandle;
-    use tokio::sync::{mpsc::unbounded_channel, oneshot};
+    use crate::scheduling::StatusUpdate;
+    use rocket::tokio;
+    use rocket::tokio::sync::{mpsc::unbounded_channel, oneshot};
 
     pub struct QueueMockUp {}
     impl QueuedTaskHandle for QueueMockUp {
@@ -486,17 +488,25 @@ mod actor_tests {
     async fn test_adding_jobs() {
         let queue = QueueMockUp {};
 
-        let (read_tx, read_rx) = unbounded_channel::<ReadRequest>();
-        let (write_tx, write_rx) = unbounded_channel::<WriteRequest>();
+        let (db_req_tx, _db_req_rx) = unbounded_channel::<DbWriteRequest>();
+        let db_writer_handle = DbWriterHandle(db_req_tx);
+
+        let (read_tx, read_rx) = unbounded_channel::<CacheReadRequest>();
+        let (write_tx, write_rx) = unbounded_channel::<CacheWriteRequest>();
         let (status_tx, status_rx) = unbounded_channel::<StatusUpdate>();
 
-        spawn_cache_actor(queue, read_rx, write_rx, status_rx, 5);
+        spawn_cache_actor(queue, db_writer_handle, read_rx, write_rx, status_rx, 5);
 
         // Add a new Job
-        let write_request = WriteRequest::AddNewJob {
+        let job_status = JobStatusDetail {
             id: 0,
-            tasks: vec![0, 1],
+            status: Status::Pending,
+            task_statuses: vec![
+                (0, Status::Pending),
+                (1, Status::Pending),
+            ]
         };
+        let write_request = CacheWriteRequest::AddExistingJob(job_status);
         let _ = write_tx
             .send(write_request)
             .expect("failed to write to cache");
@@ -512,18 +522,19 @@ mod actor_tests {
 
         // request job status
         let (tx, rx) = oneshot::channel::<CacheResponse>();
-        let read_request = ReadRequest::GetJob { id: 0, from: tx };
+        let read_request = CacheReadRequest::GetJob { id: 0, from: tx };
         let _ = read_tx
             .send(read_request)
             .expect("failed to send read request");
         let reponse: CacheResponse = rx.await.expect("response failed");
+
         assert_eq!(
             reponse,
-            CacheResponse::JobStatus {
+            CacheResponse::JobStatus(JobStatusDetail {
                 id: 0,
                 status: Status::Running,
                 task_statuses: vec![(0, Status::Running), (1, Status::Pending)],
-            }
+            })
         );
     }
 }

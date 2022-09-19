@@ -43,7 +43,6 @@ pub async fn login(
     cookies: &CookieJar<'_>,
     mut credential: Form<CredentialFileForm<'_>>,
 ) -> (Status, &'static str) {
-
     let maybe_credential = match credential.read_content().await {
         Ok(content) => key_pair.decode_credentials(&content).ok(),
         Err(_) => return (Status::BadRequest, "Failed to parse credentials."),

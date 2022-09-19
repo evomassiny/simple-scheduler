@@ -1,6 +1,6 @@
-use crate::models::{ModelError, Status, Task, UserId};
+use crate::models::{ModelError, Status, UserId};
 use crate::rocket::futures::TryStreamExt;
-use crate::sqlx::Row;
+
 use chrono::{NaiveDateTime, Utc};
 use sqlx::sqlite::SqliteConnection;
 
@@ -93,140 +93,6 @@ impl Job<JobId> {
         Ok(())
     }
 
-    /// query database and return all jobs with a status set to `status`
-    pub async fn select_by_status(
-        status: &Status,
-        conn: &mut SqliteConnection,
-    ) -> Result<Vec<Self>, ModelError> {
-        let mut jobs: Vec<Self> = Vec::new();
-        let mut rows = sqlx::query(
-            "SELECT id, name, submit_time, user FROM jobs WHERE status = ? ORDER BY submit_time",
-        )
-        .bind(status.as_u8())
-        .fetch(conn);
-
-        while let Some(row) = rows
-            .try_next()
-            .await
-            .map_err(|e| ModelError::DbError(e.to_string()))?
-        {
-            jobs.push(Self {
-                id: row
-                    .try_get("id")
-                    .map_err(|_| ModelError::ColumnError("id".to_string()))?,
-                name: row
-                    .try_get("name")
-                    .map_err(|_| ModelError::ColumnError("name".to_string()))?,
-                status: *status,
-                submit_time: row
-                    .try_get("submit_time")
-                    .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
-                user: row
-                    .try_get("user")
-                    .map_err(|_| ModelError::ColumnError("user".to_string()))?,
-            });
-        }
-        Ok(jobs)
-    }
-
-    /// Select a Job by its id
-    pub async fn get_by_id(id: JobId, conn: &mut SqliteConnection) -> Result<Self, ModelError> {
-        let row = sqlx::query("SELECT id, name, status, submit_time, user FROM jobs WHERE id = ?")
-            .bind(&id)
-            .fetch_one(conn)
-            .await
-            .map_err(|_| ModelError::ModelNotFound)?;
-
-        let status_code: u8 = row
-            .try_get("status")
-            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
-        let status = Status::from_u8(status_code)
-            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
-        Ok(Self {
-            id: row
-                .try_get("id")
-                .map_err(|_| ModelError::ColumnError("id".to_string()))?,
-            name: row
-                .try_get("name")
-                .map_err(|_| ModelError::ColumnError("name".to_string()))?,
-            status,
-            submit_time: row
-                .try_get("submit_time")
-                .map_err(|_| ModelError::ColumnError("submit_time".to_string()))?,
-            user: row
-                .try_get("user")
-                .map_err(|_| ModelError::ColumnError("user".to_string()))?,
-        })
-    }
-
-    pub async fn get_job_status_by_id(
-        id: JobId,
-        conn: &mut SqliteConnection,
-    ) -> Result<Status, ModelError> {
-        let row = sqlx::query("SELECT status FROM jobs WHERE id = ?")
-            .bind(id)
-            .fetch_one(conn)
-            .await
-            .map_err(|_| ModelError::ModelNotFound)?;
-        let status_code: u8 = row
-            .try_get("status")
-            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
-        let status = Status::from_u8(status_code)
-            .map_err(|_| ModelError::ColumnError("status".to_string()))?;
-        Ok(status)
-    }
-
-    /// Lookup state of all tasks composing the job, and update self.status accordingly.
-    /// (commit changes in DB).
-    ///
-    /// * If all task failed => failure
-    /// * If ONE task canceled => Canceled
-    /// * If ONE task Stopped => Stopped
-    /// * If ONE task Killed => killed
-    /// * if mix failure/succed => succeed
-    pub async fn update_job_state_from_task_ones(
-        read_conn: &mut SqliteConnection,
-        write_conn: &mut SqliteConnection,
-        job_id: JobId,
-    ) -> Result<(), ModelError> {
-        let task_statuses = Task::select_statuses_by_job(job_id, &mut *read_conn).await?;
-
-        for status in &task_statuses {
-            if !status.is_finished() {
-                // if there is remaining tasks
-                // no need to update job staus
-                return Ok(());
-            }
-        }
-        let mut job_status = Status::Failed;
-        for status in &task_statuses {
-            match status {
-                Status::Stopped => {
-                    job_status = Status::Stopped;
-                    break;
-                }
-                Status::Canceled => {
-                    job_status = Status::Canceled;
-                    break;
-                }
-                Status::Killed => {
-                    job_status = Status::Killed;
-                    break;
-                }
-                Status::Succeed => {
-                    job_status = Status::Succeed;
-                }
-                _ => {}
-            }
-        }
-        let _query_result = sqlx::query("UPDATE jobs SET status = ? WHERE id = ?")
-            .bind(&job_status.as_u8())
-            .bind(&job_id)
-            .execute(&mut *write_conn)
-            .await
-            .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
-        Ok(())
-    }
 
     /// Set new status for job identified by `job_id`
     pub async fn set_status(
@@ -243,12 +109,4 @@ impl Job<JobId> {
         Ok(())
     }
 
-    pub async fn task_count(&self, read_conn: &mut SqliteConnection) -> Result<usize, ModelError> {
-        let (count,): (u32,) = sqlx::query_as("SELECT COUNT(id) FROM tasks WHERE job = ?")
-            .bind(self.id)
-            .fetch_one(read_conn)
-            .await
-            .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
-        Ok(count as usize)
-    }
 }

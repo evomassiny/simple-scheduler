@@ -8,8 +8,8 @@ use nix::{
         epoll::{epoll_create, epoll_ctl, epoll_wait, EpollEvent, EpollFlags, EpollOp},
         signal::{kill, SigSet, Signal},
         signalfd::{siginfo, SfdFlags, SignalFd},
-        timerfd::{TimerFd, ClockId, TimerFlags, TimerSetTimeFlags, Expiration},
         time::TimeSpec,
+        timerfd::{ClockId, Expiration, TimerFd, TimerFlags, TimerSetTimeFlags},
     },
     unistd::{close, read, Pid},
 };
@@ -88,7 +88,10 @@ impl Monitor {
     }
 
     /// connect to the hypervisor socket and send a status update
-    fn send_msg_to_hypervisor(&mut self, msg: MonitorMsg) -> Result<(), Box<dyn std::error::Error>> {
+    fn send_msg_to_hypervisor(
+        &mut self,
+        msg: MonitorMsg,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref hypervisor_socket) = self.hypervisor_socket {
             self.update_message_count += 1;
             let hypervisor_socket = hypervisor_socket.clone();
@@ -175,7 +178,10 @@ impl Monitor {
         // Create a Timerfd
         let interval = TimeSpec::new(self.update_period_in_sec.try_into()?, 0);
         let timer = TimerFd::new(ClockId::CLOCK_REALTIME, TimerFlags::TFD_NONBLOCK)?;
-        timer.set(Expiration::Interval(interval), TimerSetTimeFlags::TFD_TIMER_ABSTIME)?;
+        timer.set(
+            Expiration::Interval(interval),
+            TimerSetTimeFlags::TFD_TIMER_ABSTIME,
+        )?;
         let timer_fd: RawFd = timer.as_raw_fd();
 
         // setup epoll
@@ -199,8 +205,7 @@ impl Monitor {
             Some(&mut listener_event),
         )?;
         // register timer fd to epoll
-        let mut timer_event =
-            EpollEvent::new(EpollFlags::EPOLLIN, timer_fd.try_into()?);
+        let mut timer_event = EpollEvent::new(EpollFlags::EPOLLIN, timer_fd.try_into()?);
         epoll_ctl(
             epoll_fd,
             EpollOp::EpollCtlAdd,
@@ -274,7 +279,12 @@ impl Monitor {
                                 // Cleanup whole process directory.
                                 let _ = std::fs::remove_dir_all(&self.handle.directory);
                                 // warn hypervisor about self-termination
-                                self.broadcast_suicide();
+                                if let Err(e) = self.broadcast_suicide() {
+                                    eprintln!(
+                                        "monitor {}: error while broadcasting suicide '{:?}'",
+                                        self.task_id, e
+                                    );
+                                }
                                 break 'wait_loop;
                             }
                             Ok(false) => continue 'process_loop,

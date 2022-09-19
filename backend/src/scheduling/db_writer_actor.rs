@@ -17,8 +17,9 @@ use rocket::tokio::{
 };
 use sqlx::sqlite::SqlitePool;
 
-/// Should represents the whole set of database write requests
-pub enum WriteRequest {
+/// Represents the whole set of database write requests
+#[derive(Debug)]
+pub enum DbWriteRequest {
     /// store a task status,
     /// if the status happens to be a final one, tries to load
     /// the task stderr/stdout
@@ -42,6 +43,13 @@ impl DbWriterActor {
         Self { db_pool }
     }
 
+    /// Create a job from a `WorkFlowGraph`, 
+    /// and store it inside the database, (along with all the relates models).
+    /// Returns a tuple of 3 elements:
+    /// 0. the job id,
+    /// 1. the vec of all IDs of each tasks
+    /// 3. a Vec of all dependencies between tasks,
+    ///    each element of this vec being a tuple of the ID of the parent and child task.
     pub async fn insert_job(
         &mut self,
         graph: WorkFlowGraph,
@@ -73,11 +81,11 @@ impl DbWriterActor {
         task: TaskId,
         status: Status,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("setting {task} to {status:?}");
+        println!("db: setting {task} to {status:?}");
         let mut conn = self.db_pool.acquire().await?;
         let _ = Task::<TaskId>::set_status(&mut conn, task, &status).await?;
 
-        if status.is_finished() {
+        if status.is_finished() && !matches!(status, Status::Canceled) {
             let mut task = Task::get_by_id(task, &mut conn).await?;
             let task_handle = task.handle();
 
@@ -93,7 +101,7 @@ impl DbWriterActor {
 
             // Ask monitor to clean-up file system and quit
             if let Err(error) = task_handle.terminate_monitor().await {
-                eprintln!("Failed to terminate monitor process {:?}", error);
+                eprintln!("db_writer: Failed to terminate monitor process {:?}", error);
             }
         }
         Ok(())
@@ -102,83 +110,106 @@ impl DbWriterActor {
 
 /// Handle to the DataBase writer actor.
 #[derive(Clone)]
-pub struct DbWriterHandle(UnboundedSender<WriteRequest>);
+pub struct DbWriterHandle(pub(crate) UnboundedSender<DbWriteRequest>);
 
 impl DbWriterHandle {
-    pub async fn insert_job(&self, job: WorkFlowGraph, user: UserId) -> Option<(JobId, Vec<TaskId>, Vec<(TaskId, TaskId)>)> {
+
+    /// Ask the db_writer_actor to store a `WorkFlowGraph` as a job, 
+    /// (along with all the relates models).
+    ///
+    /// Returns a tuple of 3 elements:
+    /// 0. the job id,
+    /// 1. the vec of all IDs of each tasks
+    /// 3. a Vec of all dependencies between tasks,
+    ///    each element of this vec being a tuple of the ID of the parent and child task.
+    pub async fn insert_job(
+        &self,
+        job: WorkFlowGraph,
+        user: UserId,
+    ) -> Option<(JobId, Vec<TaskId>, Vec<(TaskId, TaskId)>)> {
         let (tx, rx) = channel::<(JobId, Vec<TaskId>, Vec<(TaskId, TaskId)>)>();
-        self.0.send(WriteRequest::InsertJob {
+        let request = DbWriteRequest::InsertJob {
             job,
             user,
             resp_channel: tx,
-        });
+        };
+        if let Err(e) = self.0.send(request) {
+            eprintln!("db_writer handle: failed to send InsertJob msg: {:?}", e);
+            return None;
+        }
         match rx.await {
             Ok(job_summary) => Some(job_summary),
             Err(e) => {
-                eprintln!("InsertJob error: {:?}", e);
+                eprintln!("db_writer handle: InsertJob error: {:?}", e);
                 None
-            },
+            }
         }
     }
 
+    /// Ask the db_writer_actor to update the status of a task
     pub fn set_task_status(&self, task: TaskId, status: Status) {
-        if let Err(e) = self.0.send(WriteRequest::SetTaskStatus {
+        if let Err(e) = self.0.send(DbWriteRequest::SetTaskStatus {
             task_id: task,
             status,
         }) {
-            eprintln!("Error while sending write request: {e}");
+            eprintln!("db_writer handle: Error while sending write request: {e}");
         }
     }
 
+    /// Ask the db_writer_actor to update the status of a job
     pub fn set_job_status(&self, job: JobId, status: Status) {
-        if let Err(e) = self.0.send(WriteRequest::SetJobStatus {
+        if let Err(e) = self.0.send(DbWriteRequest::SetJobStatus {
             job_id: job,
             status,
         }) {
-            eprintln!("Error while sending write request: {e}");
-        }
-;
+            eprintln!("db_writer handle: Error while sending write request: {e}");
+        };
     }
 }
 
+/// Spawn an actor responsible for writting into the SQLite database.
+/// Using this actor, and _only_ this actor for database writting
+/// avoid race condition when writting data concurrently.
+///
+/// This function returns a `DbWriterHandle`, use it to comunicate with
+/// the actor.
 pub fn spawn_db_writer_actor(db_write_pool: SqlitePool) -> DbWriterHandle {
-
     let mut writer_actor = DbWriterActor {
         db_pool: db_write_pool,
     };
-    let (to_writer, mut from_handle) = unbounded_channel::<WriteRequest>();
+    let (to_writer, mut from_handle) = unbounded_channel::<DbWriteRequest>();
 
     tokio::spawn(async move {
         loop {
             match from_handle.recv().await {
-                Some(WriteRequest::SetTaskStatus { task_id, status }) => {
+                Some(DbWriteRequest::SetTaskStatus { task_id, status }) => {
                     if let Err(e) = writer_actor.set_task_status(task_id, status).await {
-                        eprintln!("Error while setting state {status:?} for task {task_id}: {e:?}");
+                        eprintln!("db_writer: Error while setting state {status:?} for task {task_id}: {e:?}");
                     }
                 }
-                Some(WriteRequest::SetJobStatus { job_id, status }) => {
+                Some(DbWriteRequest::SetJobStatus { job_id, status }) => {
                     if let Err(e) = writer_actor.set_job_status(job_id, status).await {
-                        eprintln!("Error while setting state {status:?} for job {job_id}: {e:?}");
+                        eprintln!("db_writer: Error while setting state {status:?} for job {job_id}: {e:?}");
                     }
                 }
                 // read job insertion request, return the newly inserted job id
-                Some(WriteRequest::InsertJob {
+                Some(DbWriteRequest::InsertJob {
                     job,
                     user,
                     resp_channel,
-                }) => {
-                    match writer_actor.insert_job(job, user).await {
-                        Ok((job, tasks, dependencies)) => {
-                            resp_channel.send((job, tasks, dependencies));
-                        },
-                        Err(e) => {
-                            eprintln!("db_writer: InsertJob error: {:?}", e);
-                        },
+                }) => match writer_actor.insert_job(job, user).await {
+                    Ok((job, tasks, dependencies)) => {
+                        if let Err(e) = resp_channel.send((job, tasks, dependencies)) {
+                            eprintln!("db_writer: failed to send job to db_writer {:?}", e);
+                        }
                     }
-                }
+                    Err(e) => {
+                        eprintln!("db_writer: InsertJob error: {:?}", e);
+                    }
+                },
                 None => {
                     continue;
-                },
+                }
             };
         }
     });

@@ -4,7 +4,7 @@ use crate::messaging::MonitorMsg;
 use crate::messaging::TaskStatus;
 use crate::models::{Status, TaskId};
 use crate::rocket::tokio::io::AsyncWriteExt;
-use rocket::tokio::sync::mpsc::{UnboundedSender};
+use rocket::tokio::sync::mpsc::UnboundedSender;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::error::Error;
@@ -81,30 +81,9 @@ impl TaskStatusCache {
     /// remove old entries and entries that won't change (eg: status of terminated tasks)
     fn garbage_collect(&mut self) {
         if self.version_age_by_task.len() >= self.capacity {
-            //// first pass remove task that can't change their status
-            // self.drop_state_in_final_state();
-            
-            // second pass remove oldest entries
             while self.version_age_by_task.len() >= self.capacity {
                 self.drop_oldest_entry();
             }
-        }
-    }
-
-    fn drop_state_in_final_state(&mut self) {
-        let tasks: Vec<TaskId> = self
-            .version_age_by_task
-            .values()
-            .filter_map(|status_date| {
-                if status_date.status.is_terminated() {
-                    Some(status_date.task_id)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        for task in tasks {
-            self.version_age_by_task.remove(&task);
         }
     }
 
@@ -169,7 +148,6 @@ pub async fn process_monitor_message(
             // close connection with monitor process
             let _ = ExecutorQuery::Ok.async_send_to(&mut *stream).await;
             let _ = stream.shutdown().await;
-            println!("received status {status:?} from task {task_id}");
 
             // send new version to job status cache
             if version_cache.status_changed(task_id, update_version, status) {
@@ -181,7 +159,6 @@ pub async fn process_monitor_message(
                     TaskStatus::Succeed => Status::Succeed,
                     TaskStatus::Running => Status::Running,
                 };
-                println!("status changed for task {task_id}");
                 job_cache_handle.send(StatusUpdate { task_id, status })?;
             }
         }
@@ -189,7 +166,7 @@ pub async fn process_monitor_message(
             // close connection with monitor process
             let _ = ExecutorQuery::Ok.async_send_to(&mut *stream).await;
             let _ = stream.shutdown().await;
-            println!("stopping the monitoring of {task_id}");
+            println!("status aggregator: stopping the monitoring of {task_id}");
             version_cache.drop_entry(task_id);
         }
         MonitorMsg::Ok => { /* nothing to do */ }
@@ -220,7 +197,6 @@ pub fn spawn_task_status_aggregator_actor(
             // also listen for messages, either from the web app or from a monitor process.
             match listener.accept().await {
                 Ok((mut stream, _addr)) => {
-                    println!("Got connection");
                     if let Err(e) = process_monitor_message(
                         &mut stream,
                         &mut version_cache,

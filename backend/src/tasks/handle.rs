@@ -1,4 +1,4 @@
-use crate::messaging::{AsyncSendable, ExecutorQuery, TaskStatus, MonitorMsg};
+use crate::messaging::{AsyncSendable, ExecutorQuery, MonitorMsg, TaskStatus};
 use nix::unistd::Pid;
 use rocket::tokio::{
     fs::{metadata, File},

@@ -34,7 +34,6 @@ pub struct ExecutorActor {
 impl ExecutorActor {
     /// submit a task
     async fn spawn_task(&self, task: TaskId) -> Result<(), Box<dyn Error>> {
-        println!("executor: spawning {task}");
         let mut read_conn = self.db_read_pool.acquire().await?;
         let commands: Vec<String> = TaskCommandArgs::select_by_task(task, &mut read_conn)
             .await?
@@ -73,6 +72,7 @@ impl ExecutorHandle for ExecutorActorHandle {
     }
 }
 
+/// Spawn actor responsible for spawning and killing tasks
 pub fn spawn_executor_actor(
     db_read_pool: SqlitePool,
     hypervisor_socket: PathBuf,
@@ -87,13 +87,15 @@ pub fn spawn_executor_actor(
         loop {
             match from_handle.recv().await {
                 Some(ExecutorMsg::Kill(task)) => {
-                    executor_actor.kill_task(task).await;
-                },
+                    if let Err(e) = executor_actor.kill_task(task).await {
+                        eprintln!("executor actor: Error while killing task: {:?}", e);
+                    }
+                }
                 Some(ExecutorMsg::Spawn(task)) => {
                     if let Err(e) = executor_actor.spawn_task(task).await {
-                        eprintln!("Error while spawning task: {:?}", &e);
+                        eprintln!("executor actor: Error while spawning task: {:?}", e);
                     }
-                },
+                }
                 None => break,
             };
         }
