@@ -3,6 +3,7 @@ from pprint import pprint
 from requests import Session
 from time import sleep
 from zipfile import ZIP_DEFLATED, ZipFile
+from typing import List, Optional
 
 repo_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -33,41 +34,32 @@ with open(workflow_path, "rb") as workflow_fd:
     with ZipFile(zip_file, "w", compression=ZIP_DEFLATED) as zf:
         zf.writestr("job.xml", workflow_fd.read())
 
+job: Optional[int] = None
 with open(zip_file, "rb") as zip_fd:
     response = session.post(
         "http://127.0.0.1:8000/rest/scheduler/submit/",
         files={"file": (os.path.basename(zip_file), zip_fd, "application/zip")},
     )
-    data = response.json()
-    pprint(data)
-    print()
+    job = response.json()["id"]
 
-job_id = data["id"]
-print("get status")
-for _ in range(4):
-    response = session.get(
-        "http://127.0.0.1:8000/rest/scheduler/jobs/{job_id:d}".format(job_id=job_id),
-    )
-    data = response.json()
-    pprint(data)
-    sleep(0.5)
-    print()
-
-print("Killing job")
-response = session.put(
-    "http://127.0.0.1:8000/rest/scheduler/jobs/{job_id:d}/kill".format(job_id=job_id),
-)
-if response.status_code == 200:
-    data = response.json()
-    pprint(data)
-else:
-    print("Failed:")
-    print(response.text)
-print()
-
-print("get status")
 response = session.get(
-    "http://127.0.0.1:8000/rest/scheduler/jobs/{job_id:d}".format(job_id=job_id),
+    f"http://127.0.0.1:8000/rest/scheduler/jobs/{job:d}/tasks",
 )
 data = response.json()
-pprint(data)
+
+tasks: List[int] = []
+for task_id in data["tasks"]:
+    tasks.append(int(task_id))
+print(tasks)
+
+while True:
+    for task in tasks:
+        response = session.get(
+            f"http://127.0.0.1:8000/rest/scheduler/tasks/{task:d}",
+        )
+        data = response.json()
+        pprint(data)
+        print()
+    sleep(1)
+    print()
+

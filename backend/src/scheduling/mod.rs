@@ -64,7 +64,7 @@ mod queue_actor;
 mod status_aggregator_actor;
 
 pub use crate::scheduling::cache_actor::JobStatusDetail;
-pub use crate::scheduling::client::SchedulerClient;
+pub use crate::scheduling::client::{SchedulerClient, TaskOutput};
 
 use crate::scheduling::executor_actor::spawn_executor_actor;
 

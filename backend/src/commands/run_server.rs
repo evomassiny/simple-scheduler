@@ -29,7 +29,17 @@ pub async fn run_server(rocket: Rocket<Build>, config: &Config) -> Result<(), &'
         .manage(key_pair)
         .mount(
             "/rest/scheduler/",
-            routes![rest::job_status, rest::submit_job, rest::kill_job, login],
+            routes![
+                // auth
+                login,
+                // jobs
+                rest::job_status,
+                rest::list_job_tasks,
+                rest::submit_job,
+                rest::kill_job,
+                // tasks
+                rest::task_outputs,
+            ],
         )
         .launch()
         .await

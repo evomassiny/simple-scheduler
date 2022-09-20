@@ -18,10 +18,18 @@ use sqlx::sqlite::SqlitePool;
 use std::str::FromStr;
 use tempfile::NamedTempFile;
 
+pub struct TaskOutput {
+    pub status: Status,
+    pub stderr: String,
+    pub stdout: String,
+}
+
 #[derive(Debug)]
 pub enum SchedulerClientError {
     KillFailed(String),
     JobCreationError,
+    DbError(String),
+    UnknownTask,
     UnknownJob,
     UnknownUser,
     RequestSendingError,
@@ -37,10 +45,15 @@ impl std::error::Error for SchedulerClientError {}
 /// Struct handling handling communication
 /// with the scheduler (eg: the swarm of actors that compose the hypervisor).
 pub struct SchedulerClient {
+    /// database pool, only used for reads
     read_pool: SqlitePool,
+    /// handle to the DbWriter actoro
     db_writer_handle: DbWriterHandle,
+    /// handle to the Cache actor
     status_cache_reader: CacheReader,
+    /// handle to the Cache actor
     status_cache_writer: CacheWriter,
+    /// handle to the queue actor
     submission_handle: QueueSubmissionClient,
 }
 
@@ -162,7 +175,7 @@ impl SchedulerClient {
     }
 
     /// Tells the hypervisor to SIGKILL the job `job_id`
-    pub async fn kill_job(&self, job_id: i64) -> Result<(), SchedulerClientError> {
+    pub async fn kill_job(&self, job_id: JobId) -> Result<(), SchedulerClientError> {
         self.submission_handle.remove_job_from_queue(job_id);
         Ok(())
     }
@@ -242,5 +255,43 @@ impl SchedulerClient {
     ) -> Option<User<UserId>> {
         let mut conn = self.read_pool.acquire().await.ok()?;
         credentials.get_user(&mut conn).await
+    }
+
+    /// fetch task stderr/stdout/status
+    pub async fn get_task_outputs(
+        &self,
+        task: TaskId,
+        user: UserId,
+    ) -> Result<TaskOutput, SchedulerClientError> {
+        let mut conn = self
+            .read_pool
+            .acquire()
+            .await
+            .map_err(|e| SchedulerClientError::DbError(e.to_string()))?;
+
+        // fetch stderr/stdout/status from tasks,
+        // (filter tasks that do not belong to the user).
+        let row = sqlx::query("SELECT tasks.status, tasks.stdout, tasks.stderr FROM tasks LEFT JOIN jobs on tasks.job = jobs.id WHERE tasks.id = ? and jobs.user = ?")
+            .bind(&task)
+            .bind(&user)
+            .fetch_one(&mut conn)
+            .await
+            .map_err(|e| SchedulerClientError::DbError(e.to_string()))?;
+        let stderr: String = row
+            .try_get("stderr")
+            .map_err(|_| SchedulerClientError::UnknownTask)?;
+        let stdout: String = row
+            .try_get("stdout")
+            .map_err(|_| SchedulerClientError::UnknownTask)?;
+        let status_code: u8 = row
+            .try_get("status")
+            .map_err(|_| SchedulerClientError::UnknownTask)?;
+        let status: Status = Status::from_u8(status_code)
+            .map_err(|_| SchedulerClientError::DbError("bad status code".to_string()))?;
+        Ok(TaskOutput {
+            stderr,
+            stdout,
+            status,
+        })
     }
 }

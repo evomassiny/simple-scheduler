@@ -1,5 +1,5 @@
 use crate::auth::AuthToken;
-use crate::models::{Status, TaskId};
+use crate::models::{Status, TaskId, JobId};
 use crate::scheduling::{JobStatusDetail, SchedulerClient};
 use rocket::{
     form::Form,
@@ -10,7 +10,6 @@ use rocket::{
     serde::json::{json, Value as JsonValue},
     State,
 };
-use sqlx::Row;
 use std::collections::HashMap;
 
 #[derive(FromForm)]
@@ -51,7 +50,7 @@ pub async fn submit_job(
 pub async fn job_status(
     scheduler: &State<SchedulerClient>,
     _auth: AuthToken,
-    job_id: i64,
+    job_id: JobId,
 ) -> Result<JsonValue, NotFound<String>> {
     let scheduler = scheduler.inner();
 
@@ -98,12 +97,30 @@ pub async fn job_status(
     }))
 }
 
+/// return list of tasks related to `job_id`
+#[get("/jobs/<job_id>/tasks")]
+pub async fn list_job_tasks(
+    scheduler: &State<SchedulerClient>,
+    _auth: AuthToken,
+    job_id: JobId,
+) -> Result<JsonValue, NotFound<String>> {
+    let scheduler = scheduler.inner();
+
+    let JobStatusDetail { task_statuses, .. } = scheduler
+        .get_job_status(job_id)
+        .await
+        .map_err(|e| NotFound(e.to_string()))?;
+
+    let task_ids: Vec<TaskId> = task_statuses.into_iter().map(|(id, _)| id).collect();
+    Ok(json!({ "tasks": task_ids }))
+}
+
 /// Request to kill job.
 #[put("/jobs/<job_id>/kill")]
 pub async fn kill_job(
     scheduler: &State<SchedulerClient>,
     _auth: AuthToken,
-    job_id: i64,
+    job_id: JobId,
 ) -> Result<JsonValue, Custom<String>> {
     let scheduler = scheduler.inner();
 
