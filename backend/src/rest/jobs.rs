@@ -1,5 +1,5 @@
 use crate::auth::AuthToken;
-use crate::models::{Status, TaskId, JobId};
+use crate::models::{JobId, Status, TaskId};
 use crate::scheduling::{JobStatusDetail, SchedulerClient};
 use rocket::{
     form::Form,
@@ -64,17 +64,19 @@ pub async fn job_status(
         .map_err(|e| NotFound(e.to_string()))?;
 
     let mut pending_count: usize = 0;
-    let mut succeed_count: usize = 0;
     let mut running_count: usize = 0;
+    let mut finished_count: usize = 0;
     let total_count = task_statuses.len();
 
     let mut task_details: HashMap<TaskId, JsonValue> = HashMap::new();
     for (task_id, task_status) in task_statuses {
         match &task_status {
-            &Status::Succeed => succeed_count += 1,
             &Status::Pending => pending_count += 1,
             &Status::Running => running_count += 1,
             _ => {}
+        }
+        if task_status.is_finished() {
+            finished_count += 1;
         }
         task_details.insert(
             task_id,
@@ -88,7 +90,7 @@ pub async fn job_status(
         "jobInfo": {
             "jobId": id,
             "status": status.as_proactive_string(),
-            "numberOfFinishedTasks": succeed_count,
+            "numberOfFinishedTasks": finished_count,
             "numberOfPendingTasks": pending_count,
             "numberOfRunningTasks": running_count,
             "totalNumberOfTasks": total_count,
