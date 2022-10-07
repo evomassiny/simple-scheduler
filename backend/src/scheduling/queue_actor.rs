@@ -129,6 +129,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
                 tasks,
                 dependencies,
             } => {
+                println!("queue actor: submitting job {}", id);
                 let priority = tasks.len();
                 // build task index to parent/child ID tables
                 let tasks: HashSet<TaskId> = HashSet::from_iter(tasks.into_iter());
@@ -209,6 +210,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
                     .queue
                     .remove(&task_id)
                     .ok_or(QueueError::UnknownTask(task_id))?;
+
                 if let Some(children) = task.children {
                     for child_id in children {
                         let child_task = self
@@ -248,12 +250,12 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
                 // and cancel them
                 if let Some(mut to_remove) = faulty.children {
                     while let Some(child_id) = to_remove.pop() {
-                        let child = self
+                        if let Some(child) = self
                             .queue
-                            .remove(&child_id)
-                            .ok_or(QueueError::UnknownTask(child_id))?;
-                        if let Some(grand_children) = child.children {
-                            to_remove.extend(grand_children);
+                            .remove(&child_id) {
+                            if let Some(grand_children) = child.children {
+                                to_remove.extend(grand_children);
+                            }
                         }
                         // warn status_cache_writer that task was canceled
                         self.status_cache_writer.cancel_task(child_id);

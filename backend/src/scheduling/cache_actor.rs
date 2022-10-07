@@ -193,12 +193,12 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
             .ok_or(CacheError::UnknownJob(job_id))?;
         let mut statuses = Vec::new();
         for task_id in &job.tasks {
-            statuses.push(
-                self.tasks
-                    .get(task_id)
-                    .ok_or(CacheError::UnknownTask(*task_id))?
-                    .status,
-            );
+            let status = if let Some(task) = self.tasks.get(task_id) {
+                task.status
+            } else {
+                Status::Pending
+            };
+            statuses.push(status);
         }
         let mut has_running = false;
         let mut finished = true;
@@ -331,24 +331,35 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
                 let _ = self.add_job(id, status, task_statuses)?;
             }
             CacheWriteRequest::CancelTask(task_id) => {
-                self.tasks
-                    .get_mut(&task_id)
-                    .ok_or(CacheError::UnknownTask(task_id))?
-                    .status = Status::Canceled;
                 // sync db state
                 self.db_writer_handle
                     .set_task_status(task_id, Status::Canceled);
+                match self.tasks.entry(task_id) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(Task {
+                            status: Status::Canceled,
+                            job: None,
+                        });
+                    }
+                    Entry::Occupied(mut entry) => {
+                        let mut task = entry.get_mut();
+                        task.status = Status::Canceled;
+                        if let Some(job_id) = task.job {
+                            self.update_job_status(job_id);
+                        }
+                    }
+                }
             }
             CacheWriteRequest::CancelJob(job_id) => {
-                let mut job = self
-                    .jobs
-                    .get_mut(&job_id)
-                    .ok_or(CacheError::UnknownTask(job_id))?;
-                job.status = Status::Canceled;
-                job.last_access = self.access_counter;
                 // sync db state
                 self.db_writer_handle
                     .set_job_status(job_id, Status::Canceled);
+                let mut job = self
+                    .jobs
+                    .get_mut(&job_id)
+                    .ok_or(CacheError::UnknownJob(job_id))?;
+                job.status = Status::Canceled;
+                job.last_access = self.access_counter;
             }
         }
         Ok(())
