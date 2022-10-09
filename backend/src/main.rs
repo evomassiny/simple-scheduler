@@ -42,6 +42,8 @@ enum Commands {
     RunServer,
     /// Create a new user
     CreateUser { name: String, password: String },
+    /// Create a Token use to authentifiate the user
+    CreateCredentialToken { name: String, password: String },
 }
 
 #[rocket::main]
@@ -57,6 +59,12 @@ async fn main() {
             commands::create_user(&name, &password, &config)
                 .await
                 .expect("Failed to set user.");
+        }
+        // create a credential token
+        Commands::CreateCredentialToken { name, password } => {
+            commands::create_credential_token(&name, &password, &config)
+                .await
+                .expect("Failed to build credential token.");
         }
         // starts the web server
         Commands::RunServer => {

@@ -26,3 +26,4 @@ jaded = { version = "*", features = [ "derive" ] } # Java Object deserialization
 base64 = "*"
 scrypt = "0.10"
 clap = { version = "3", features =  ["derive"] }
+rand = "*"

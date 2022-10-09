@@ -4,7 +4,6 @@ use crate::scheduling::{JobStatusDetail, SchedulerClient};
 use rocket::{
     form::Form,
     fs::TempFile,
-    futures::TryStreamExt,
     http::Status as HttpStatus,
     response::status::{Custom, NotFound},
     serde::json::{json, Value as JsonValue},

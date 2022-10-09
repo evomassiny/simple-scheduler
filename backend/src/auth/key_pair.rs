@@ -5,7 +5,7 @@ use std::path::Path;
 /// App-wide auth conf
 pub struct KeyPair {
     /// PKCS8 RSA DER private key
-    public: Vec<u8>,
+    pub public: Vec<u8>,
     /// PKCS8 RSA DER public key
     private: Vec<u8>,
 }

@@ -1,5 +1,4 @@
 use crate::models::{ModelError, Status, UserId};
-use crate::rocket::futures::TryStreamExt;
 
 use chrono::{NaiveDateTime, Utc};
 use sqlx::sqlite::SqliteConnection;
