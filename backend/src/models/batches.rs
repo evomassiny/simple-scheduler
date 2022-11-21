@@ -7,7 +7,6 @@ use crate::workflows::WorkFlowGraph;
 use sqlx::sqlite::SqliteConnection;
 use sqlx::Connection;
 
-
 /// A `Batch` is a graph of task to be executed.
 /// It is a composition of 3 kinds of models:
 /// * one `crate::models::Job`: metadata about the whole Batch

@@ -1,6 +1,6 @@
 use crate::auth::AuthToken;
-use crate::models::{TaskId};
-use crate::scheduling::{SchedulerClient};
+use crate::models::TaskId;
+use crate::scheduling::SchedulerClient;
 use rocket::{
     response::status::NotFound,
     serde::json::{json, Value as JsonValue},
@@ -27,4 +27,3 @@ pub async fn task_outputs(
         "stdout": output.stdout,
     }))
 }
-

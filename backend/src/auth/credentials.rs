@@ -288,7 +288,9 @@ fn test_json_credentials_deserialization() {
         login: "some_name".to_string(),
         pass: "some_pass".to_string(),
     };
-    let token = credential.into_credential_token(PUB_KEY).expect("Failed to produce token");
+    let token = credential
+        .into_credential_token(PUB_KEY)
+        .expect("Failed to produce token");
     let should_be_same: Credentials =
         Credentials::from_encrypted_str(&token, PRIVATE_KEY).expect("Could not parse token");
     assert_eq!(&credential.login, &should_be_same.login);

@@ -5,7 +5,9 @@ use super::db_writer_actor::DbWriterHandle;
 use super::queue_actor::{QueueSubmissionClient, QueueSubmissionHandle};
 use crate::auth::{AuthToken, Credentials};
 
-use crate::models::{JobId, Status, TaskId, User, UserId};
+use crate::models::{
+    JobId, ModelError, Status, Task, TaskDepId, TaskDependency, TaskId, User, UserId,
+};
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
 use crate::workflows::WorkFlowGraph;
@@ -293,5 +295,65 @@ impl SchedulerClient {
             stdout,
             status,
         })
+    }
+
+    /// Relauch PENDING and RUNNING jobs
+    pub async fn relaunch(&self) -> Result<(), SchedulerClientError> {
+        let mut conn = self
+            .read_pool
+            .acquire()
+            .await
+            .map_err(|e| SchedulerClientError::DbError(e.to_string()))?;
+
+        let mut rows = sqlx::query("SELECT id, status FROM jobs where status = ? or status = ?")
+            .bind(Status::Pending.as_u8())
+            .bind(Status::Running.as_u8())
+            .fetch(&mut conn);
+
+        let mut jobs: Vec<(JobId, Status)> = Vec::new();
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| SchedulerClientError::DbError(e.to_string()))?
+        {
+            let job_id: JobId = row
+                .try_get("id")
+                .map_err(|_| SchedulerClientError::DbError("id".to_string()))?;
+            let status_code: u8 = row
+                .try_get("status")
+                .map_err(|_| SchedulerClientError::DbError("status".to_string()))?;
+            let job_status = Status::from_u8(status_code)
+                .map_err(|_| SchedulerClientError::DbError("status code".to_string()))?;
+
+            jobs.push((job_id, job_status));
+        }
+        drop(rows);
+
+        for (job_id, job_status) in jobs {
+            let tasks = Task::<TaskId>::select_by_job(job_id, &mut conn)
+                .await
+                .map_err(|e| SchedulerClientError::DbError(e.to_string()))?;
+            // schedule job
+            let dependencies = TaskDependency::<TaskDepId>::select_by_job(job_id, &mut conn)
+                .await
+                .map_err(|e| SchedulerClientError::DbError(e.to_string()))?;
+
+            // Add job to cache
+            let job_status = JobStatusDetail {
+                id: job_id,
+                status: job_status,
+                task_statuses: tasks.iter().map(|task| (task.id, task.status)).collect(),
+            };
+            self.status_cache_writer.add_job(job_status);
+
+            let dependency_ids: Vec<(TaskId, TaskId)> = dependencies
+                .iter()
+                .map(|dep| (dep.child, dep.parent))
+                .collect();
+            let task_ids: Vec<TaskId> = tasks.iter().map(|task| task.id).collect();
+            self.submission_handle
+                .add_job_to_queue(job_id, task_ids, dependency_ids);
+        }
+        Ok(())
     }
 }

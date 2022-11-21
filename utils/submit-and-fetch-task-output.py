@@ -53,13 +53,23 @@ for task_id in data["tasks"]:
 print(tasks)
 
 while True:
-    for task in tasks:
-        response = session.get(
-            f"http://127.0.0.1:8000/rest/scheduler/tasks/{task:d}",
-        )
-        data = response.json()
-        pprint(data)
+    try:
+        for task in tasks:
+            response = session.get(
+                f"http://127.0.0.1:8000/rest/scheduler/tasks/{task:d}",
+            )
+            data = response.json()
+            pprint(data)
+            print()
+        sleep(1)
         print()
-    sleep(1)
-    print()
+    except:
+        print("login with debug credential")
+        session = Session()
+        with open(cred_path, "rb") as cred_fd:
+            r = session.post(
+                "http://127.0.0.1:8000/rest/scheduler/login",
+                files={"credential": ("creds.enc", cred_fd, "text/plain")},
+            )
+            print(r.content)
 

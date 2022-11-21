@@ -389,7 +389,6 @@ impl CacheWriteHandle for CacheWriter {
     fn add_job(&self, job_status: JobStatusDetail) {
         let _ = self.0.send(CacheWriteRequest::AddExistingJob(job_status));
     }
-
 }
 
 /// trait for interacting with the CacheActor
@@ -512,10 +511,7 @@ mod actor_tests {
         let job_status = JobStatusDetail {
             id: 0,
             status: Status::Pending,
-            task_statuses: vec![
-                (0, Status::Pending),
-                (1, Status::Pending),
-            ]
+            task_statuses: vec![(0, Status::Pending), (1, Status::Pending)],
         };
         let write_request = CacheWriteRequest::AddExistingJob(job_status);
         let _ = write_tx

@@ -250,9 +250,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
                 // and cancel them
                 if let Some(mut to_remove) = faulty.children {
                     while let Some(child_id) = to_remove.pop() {
-                        if let Some(child) = self
-                            .queue
-                            .remove(&child_id) {
+                        if let Some(child) = self.queue.remove(&child_id) {
                             if let Some(grand_children) = child.children {
                                 to_remove.extend(grand_children);
                             }
@@ -297,8 +295,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
     }
 }
 
-
-/// Spawn actor responsible for Queuing and canceling tasks to the 
+/// Spawn actor responsible for Queuing and canceling tasks to the
 /// executor.
 pub fn spawn_queue_actor<K, S>(
     executor_handle: K,
@@ -311,43 +308,41 @@ pub fn spawn_queue_actor<K, S>(
     S: CacheWriteHandle + Send + 'static,
 {
     let mut queue_actor = QueueActor::new(executor_handle, status_cache_writer, worker_pool_size);
-    tokio::spawn(
-        async move {
-            loop {
-                tokio::select! {
-                   // this asserts that futures are polled in order, eg
-                   // it introduce a priority task event > orders > claim request
-                   biased;
-                   Some(event) = events.recv() => {
-                        match queue_actor.handle_event(event) {
-                            Ok(_) => {},
-                            Err(error) => eprintln!("queue actor: {:?}", error)
-                        }
-                   },
-                   Some(order) = orders.recv() => {
-                        match queue_actor.handle_order(order) {
-                            Ok(_) => {},
-                            Err(error) => eprintln!("queue actor: {:?}", error)
-                        }
-                   },
-                   else => break
-                }
-                // spawn tasks if we can
-                'spawn_loop: while queue_actor.has_idle_workers() {
-                    match queue_actor.spawn_task_to_executor() {
-                        Ok(has_spawned_a_task) => {
-                            if !has_spawned_a_task {
-                                // no task could be spawned, we can
-                                // stop
-                                break 'spawn_loop;
-                            }
-                        }
-                        Err(error) => eprintln!("queue actor: {:?}", error),
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+               // this asserts that futures are polled in order, eg
+               // it introduce a priority task event > orders > claim request
+               biased;
+               Some(event) = events.recv() => {
+                    match queue_actor.handle_event(event) {
+                        Ok(_) => {},
+                        Err(error) => eprintln!("queue actor: {:?}", error)
                     }
+               },
+               Some(order) = orders.recv() => {
+                    match queue_actor.handle_order(order) {
+                        Ok(_) => {},
+                        Err(error) => eprintln!("queue actor: {:?}", error)
+                    }
+               },
+               else => break
+            }
+            // spawn tasks if we can
+            'spawn_loop: while queue_actor.has_idle_workers() {
+                match queue_actor.spawn_task_to_executor() {
+                    Ok(has_spawned_a_task) => {
+                        if !has_spawned_a_task {
+                            // no task could be spawned, we can
+                            // stop
+                            break 'spawn_loop;
+                        }
+                    }
+                    Err(error) => eprintln!("queue actor: {:?}", error),
                 }
             }
         }
-    );
+    });
 }
 
 /// Handle to the QueueActor,

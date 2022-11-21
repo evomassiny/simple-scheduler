@@ -43,7 +43,7 @@ impl DbWriterActor {
         Self { db_pool }
     }
 
-    /// Create a job from a `WorkFlowGraph`, 
+    /// Create a job from a `WorkFlowGraph`,
     /// and store it inside the database, (along with all the relates models).
     /// Returns a tuple of 3 elements:
     /// 0. the job id,
@@ -101,7 +101,10 @@ impl DbWriterActor {
 
             // Ask monitor to clean-up file system and quit
             if let Err(error) = task_handle.terminate_monitor().await {
-                eprintln!("db_writer: Failed to terminate monitor process {:?}", error);
+                eprintln!(
+                    "db_writer: (task: {:?}) Failed to terminate monitor process {:?}",
+                    task, error
+                );
             }
         }
         Ok(())
@@ -113,8 +116,7 @@ impl DbWriterActor {
 pub struct DbWriterHandle(pub(crate) UnboundedSender<DbWriteRequest>);
 
 impl DbWriterHandle {
-
-    /// Ask the db_writer_actor to store a `WorkFlowGraph` as a job, 
+    /// Ask the db_writer_actor to store a `WorkFlowGraph` as a job,
     /// (along with all the relates models).
     ///
     /// Returns a tuple of 3 elements:

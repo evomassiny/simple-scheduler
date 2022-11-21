@@ -19,6 +19,11 @@ pub async fn run_server(rocket: Rocket<Build>, config: &Config) -> Result<(), &'
 
     let scheduler_client = start_scheduler(read_pool, socket_path, config.nb_of_workers, 1024);
 
+    // re-launch unfinished jobs
+    if let Err(e) = scheduler_client.relaunch().await {
+        eprintln!("Relaunch job failed: {:?}", e);
+    }
+
     // Load RSA key pair (for auth)
     let key_pair = KeyPair::load_from(&config.public_key_path, &config.private_key_path)
         .await

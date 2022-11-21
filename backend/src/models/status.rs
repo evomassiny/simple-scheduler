@@ -18,7 +18,6 @@ pub enum Status {
 }
 
 impl Status {
-
     pub fn is_finished(&self) -> bool {
         match *self {
             Self::Pending => false,

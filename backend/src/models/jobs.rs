@@ -92,7 +92,6 @@ impl Job<JobId> {
         Ok(())
     }
 
-
     /// Set new status for job identified by `job_id`
     pub async fn set_status(
         conn: &mut SqliteConnection,
@@ -107,5 +106,4 @@ impl Job<JobId> {
             .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         Ok(())
     }
-
 }

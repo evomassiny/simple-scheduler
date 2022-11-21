@@ -1,6 +1,6 @@
 use rocket::serde::Deserialize;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnectOptions};
-use sqlx::{Connection, SqliteConnection, ConnectOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
+use sqlx::{ConnectOptions, Connection, SqliteConnection};
 use std::str::FromStr;
 
 #[derive(Deserialize, Debug)]
