@@ -4,11 +4,11 @@ This is a job hypervisor,
 mimicking a really small subset of the ["proactive-scheduler"](https://www.activeeon.com/products/workflows-scheduling/).
 
 This app is an hypervisor, able to spawn jobs according to 
-an user-provided execution plans.
+an user-provided execution plan.
 
-Concretly it's a web app providing a REST API to spawn a bunch of bash command on the web-server.
+Concretly it's a web app providing a REST API to spawn a bunch of bash commands on a web-server.
 
-The app acts as an hypervisor, and is able to schedule the jobs' execution order according to a dependency
+The app acts as an hypervisor, and is able to schedule jobs' execution order according to a dependency
 graph provided by the user (in XML).
 
 The app also keeps track of the status of each job, and is able to retreive their stdout/stderr output.
@@ -110,10 +110,10 @@ sudo systemctl start simple-scheduler.service
 
 ## use of "unsafe"
 The executor part of this app use a lot of libc function:
-* fork process
-* handle signals/sigaction
-* dup stderr/stdout to files
-* create inter processus semaphores
-* write into argv[0]
+* to fork process
+* to handle signals/sigaction
+* to dup stderr/stdout to files
+* to create inter processus semaphores
+* to write into argv[0]
 
 When available, most of this is done through the nix abstractions, otherwise directly through the libc. Both use unsafe APIs.
