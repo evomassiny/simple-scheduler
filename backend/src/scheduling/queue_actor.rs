@@ -200,6 +200,46 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
         Ok(())
     }
 
+    /// Remove a task, and all task that depends of it, from the task queue.
+    /// It also removes those tasks from any parents `children` list.
+    ///
+    /// It returns the set of removed tasks, including `task_id`.
+    fn remove_task_and_children_from_queue(&mut self, task_id: TaskId) 
+        -> Result<HashSet<TaskId>, QueueError> {
+        let group: JobId = self.queue.get(&task_id).ok_or_else(
+            || QueueError::UnknownTask(task_id)
+        )?.group;
+
+        let mut removed_tasks: HashSet<TaskId> = HashSet::new();
+        let mut to_crawl: Vec<TaskId> = vec![task_id];
+        
+        // recursively remove tasks, and their children
+        // while keeping track of the removed ones.
+        while let Some(task_id) = to_crawl.pop() {
+            if let Some(task) = self.queue.remove(&task_id) {
+                if let Some(children) = task.children {
+                    to_crawl.extend(children);
+                }
+            }
+            // keep track of removed task
+            removed_tasks.insert(task_id);
+        }
+
+        // we must removes the references pointing to the removed tasks.
+        // sadly, because we dont store the `child -> parent` edges,
+        // we must check in _all_ remaining tasks if some of their
+        // children were removed.
+        for task in self.queue.values_mut().filter(|t| t.group == group) {
+            if let Some(ref mut children) = task.children {
+                children.retain(|t| !removed_tasks.contains(t));
+                if children.is_empty() {
+                    task.children = None;
+                }
+            }
+        }
+        Ok(removed_tasks)
+    }
+
     pub fn handle_event(&mut self, event: TaskEvent) -> Result<(), QueueError> {
         match event {
             // remove task from queue,
@@ -217,18 +257,13 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
                             .queue
                             .get_mut(&child_id)
                             .ok_or(QueueError::UnknownTask(child_id))?;
-                        match &child_task.state {
-                            QueuedState::AwaitingParents(parents) => {
-                                let parents: Vec<TaskId> = parents
-                                    .iter()
-                                    .copied()
-                                    .filter(|id| *id != task_id)
-                                    .collect();
+
+                        match child_task.state {
+                            QueuedState::AwaitingParents(ref mut parents) => {
+                                parents.retain(|id| *id != task_id);
                                 if parents.is_empty() {
                                     child_task.state = QueuedState::AwaitingSpawning;
-                                } else {
-                                    child_task.state = QueuedState::AwaitingParents(parents);
-                                }
+                                } 
                             }
                             _ => continue,
                         }
@@ -242,23 +277,14 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
             }
             // remove task and its children from queue,
             TaskEvent::TaskFailed(task_id) => {
-                let faulty = self
-                    .queue
-                    .remove(&task_id)
-                    .ok_or(QueueError::UnknownTask(task_id))?;
-                // recursively remove children,
-                // and cancel them
-                if let Some(mut to_remove) = faulty.children {
-                    while let Some(child_id) = to_remove.pop() {
-                        if let Some(child) = self.queue.remove(&child_id) {
-                            if let Some(grand_children) = child.children {
-                                to_remove.extend(grand_children);
-                            }
-                        }
-                        // warn status_cache_writer that task was canceled
-                        self.status_cache_writer.cancel_task(child_id);
-                    }
+
+                // remove failed task + children from queue
+                let children = self.remove_task_and_children_from_queue(task_id)?;
+                // Cancel the children tasks
+                for &child_id in children.iter().filter(|&child_id| *child_id != task_id) {
+                    self.status_cache_writer.cancel_task(child_id);
                 }
+
                 // update running task count
                 self.busy_workers = match self.busy_workers {
                     0 => 0,
@@ -430,6 +456,22 @@ mod queue_actor_tests {
         fn add_job(&self, _job: JobStatusDetail) {}
     }
 
+    fn mock_task_success(handle: &UnboundedSender<TaskEvent>, task: TaskId) {
+        let task_event = TaskEvent::TaskStarted(task);
+        let _ = handle.send(task_event).expect("status update failed");
+        let task_event = TaskEvent::TaskSucceed(task);
+        let _ = handle.send(task_event).expect("status update failed");
+    }
+
+    fn mock_task_failure(handle: &UnboundedSender<TaskEvent>, task: TaskId) {
+        let task_event = TaskEvent::TaskStarted(task);
+        let _ = handle.send(task_event).expect("status update failed");
+        // finish the first one
+        let task_event = TaskEvent::TaskFailed(task);
+        let _ = handle.send(task_event).expect("status update failed");
+    }
+
+
     #[tokio::test]
     async fn test_filling_queue_with_one_task() {
         // build executor mock-up
@@ -542,9 +584,9 @@ mod queue_actor_tests {
         );
 
         // Spawn 3 tasks, with dependencies:
-        //     1
-        //   /  \
-        //  2    3
+        //    1
+        //   / \
+        //  2   3
         let submission = QueueSubmission::AddJobToQueue {
             id: 0,
             tasks: vec![1, 2, 3],
@@ -582,10 +624,74 @@ mod queue_actor_tests {
     }
 
     #[tokio::test]
-    async fn test_failure_propagation() {
-        use tokio::sync::mpsc::error::TryRecvError;
+    async fn test_failure_propagation_in_task_tree() {
+        // Spawn 3 tasks, with the following dependencies:
+        //     1
+        //     |
+        //     2
+        //     |
+        //     3
+        //  Asserts that the failure of `2` cancels the 
+        //  task `3`.
+
+        // build cache mock-up
         let status_cache_writer = CacheMockUp {};
-        use tokio::sync::mpsc::unbounded_channel;
+        // build executor mock-up
+        let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
+        let (kill_tx, _kill_rx) = unbounded_channel::<TaskId>();
+        let executor_handle = ExecutorMockUp { spawn_tx, kill_tx };
+
+        let (task_sender, task_receiver) = unbounded_channel::<TaskEvent>();
+        let (submission_sender, submission_receiver) = unbounded_channel::<QueueSubmission>();
+
+        spawn_queue_actor(
+            executor_handle,
+            status_cache_writer,
+            task_receiver,
+            submission_receiver,
+            10,
+        );
+
+        let submission = QueueSubmission::AddJobToQueue {
+            id: 0,
+            tasks: vec![1, 2, 3],
+            // task 2 and 3 depend of task 1
+            dependencies: vec![(1, 2), (2, 3)],
+        };
+        let _ = submission_sender
+            .send(submission)
+            .expect("failed to send task");
+
+        // assert that the first one has been spawned
+        assert_eq!(spawn_rx.recv().await, Some(1));
+
+        // run task 1: declare it as succeed
+        mock_task_success(&task_sender, 1);
+
+        // assert that the second one has been spawned
+        assert_eq!(spawn_rx.recv().await, Some(2));
+
+        // start the second one
+        mock_task_failure(&task_sender, 2);
+
+        // assert that the remaining one cannot be claimed,
+        // because its dependency (task 2) failed.
+        assert_eq!(spawn_rx.try_recv(), Err(TryRecvError::Empty));
+    }
+
+    #[tokio::test]
+    async fn test_failure_in_task_graph() {
+        // Spawn 5 tasks, with the following dependencies:
+        //     1
+        //    / \
+        //   2   3
+        //    \ / \
+        //     4   5
+        //
+        //  this test asserts that the failure of `2` cancels
+        //  4 while not preventing 5 to run.
+        use tokio::time::{sleep, Duration};
+        let status_cache_writer = CacheMockUp {};
 
         // build executor mock-up
         let (spawn_tx, mut spawn_rx) = unbounded_channel::<TaskId>();
@@ -603,17 +709,17 @@ mod queue_actor_tests {
             10,
         );
 
-        // Spawn 3 tasks, with dependencies:
-        //     1
-        //     |
-        //     2
-        //     |
-        //     3
         let submission = QueueSubmission::AddJobToQueue {
             id: 0,
-            tasks: vec![1, 2, 3],
+            tasks: vec![1, 2, 3, 4, 5],
             // task 2 and 3 depend of task 1
-            dependencies: vec![(1, 2), (2, 3)],
+            dependencies: vec![
+                (1, 2),
+                (1, 3),
+                (2, 4),
+                (3, 4),
+                (3, 5),
+            ],
         };
         let _ = submission_sender
             .send(submission)
@@ -622,27 +728,26 @@ mod queue_actor_tests {
         // assert that the first one has been spawned
         assert_eq!(spawn_rx.recv().await, Some(1));
 
-        // run the firt one: declare it as started
-        let task_event = TaskEvent::TaskStarted(1);
-        let _ = task_sender.send(task_event).expect("status update failed");
+        // simulate success of the task 1
+        mock_task_success(&task_sender, 1);
 
-        // finish the first one
-        let task_event = TaskEvent::TaskSucceed(1);
-        let _ = task_sender.send(task_event).expect("status update failed");
+        // assert that 2 and 3 have been launched
+        assert!(spawn_rx.recv().await.is_some());
+        assert!(spawn_rx.recv().await.is_some());
 
-        // assert that the second one has been spawned
-        assert_eq!(spawn_rx.recv().await, Some(2));
+        // simulate failure of the task 2
+        mock_task_failure(&task_sender, 2);
+        
+        // simulate success of the task 3
+        mock_task_success(&task_sender, 3);
+        
+        // assert that task 5 is scheduled
+        sleep(Duration::from_millis(300)).await;  // use sleep() + try_recv() combo
+                                                  // to prevent the test from hanging if it breaks
+        assert_eq!(spawn_rx.try_recv(), Ok(5));
 
-        // start the second one
-        let task_event = TaskEvent::TaskStarted(2);
-        let _ = task_sender.send(task_event).expect("status update failed");
-
-        // mark it as failed
-        let task_event = TaskEvent::TaskFailed(2);
-        let _ = task_sender.send(task_event).expect("status update failed");
-
-        // assert that the remaining one cannot be claimed,
-        // because its dependency (task 2) failed.
+        // assert that task 2 is NOT scheduled
+        sleep(Duration::from_millis(300)).await;  // use sleep() + try_recv() combo
         assert_eq!(spawn_rx.try_recv(), Err(TryRecvError::Empty));
     }
 }
