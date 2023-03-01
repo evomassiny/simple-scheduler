@@ -21,8 +21,6 @@ The app also keeps track of the status of each job, and is able to retreive thei
 sudo apt install libsqlite3-dev sqlite3
 # rustup
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# install `musl` to statically link release build
-rustup target add x86_64-unknown-linux-musl
 ```
 
 1. clone the repo
