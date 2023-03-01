@@ -46,11 +46,12 @@ impl Barrier {
         // * we never de-reference self.semaphore_ptr, the kernel does it itself
         //   through sem_wait() and sem_post()
         let semaphore_ptr: *mut libc::sem_t = unsafe {
+            let semaphore_size = std::num::NonZeroUsize::new_unchecked(std::mem::size_of::<libc::sem_t>());
             // request the OS for a pointer to a piece of shared memory
             // big enough to hold a semaphore
             let semaphore_ptr = mmap(
-                std::ptr::null_mut::<core::ffi::c_void>(), // NULL ptr
-                std::mem::size_of::<libc::sem_t>() as libc::size_t,
+                None, 
+                semaphore_size,
                 ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
                 MapFlags::MAP_ANONYMOUS | MapFlags::MAP_SHARED,
                 0_i32 as RawFd,

@@ -15,7 +15,9 @@ pub const CLUSTER_ATTRIBUTE_NAME: &str = "NODE_ACCESS_TOKEN";
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Info {
+    #[serde(rename = "@name")]
     pub name: String,
+    #[serde(rename = "@value")]
     pub value: String,
 }
 
@@ -27,11 +29,13 @@ pub struct GenericInformation {
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Parallel {
+    #[serde(rename = "@numberOfNodes")]
     pub numberOfNodes: usize,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Argument {
+    #[serde(rename = "@value")]
     pub value: String,
 }
 
@@ -43,6 +47,7 @@ pub struct Arguments {
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct StaticCommand {
+    #[serde(rename = "@value")]
     pub value: String,
     pub arguments: Arguments,
 }
@@ -55,7 +60,7 @@ pub struct NativeExecutable {
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct TaskRef {
-    #[serde(rename = "ref")]
+    #[serde(rename = "@ref")]
     pub task_ref: String,
 }
 
@@ -67,8 +72,11 @@ pub struct Dependencies {
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Task {
+    #[serde(rename = "@name")]
     pub name: String,
+    #[serde(rename = "@runAsMe")]
     pub runAsMe: bool,
+
     pub genericInformation: GenericInformation,
     pub depends: Option<Dependencies>,
     pub parallel: Option<Parallel>,
@@ -84,6 +92,7 @@ pub struct TaskFlow {
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Job {
+    #[serde(rename = "@name")]
     pub name: String,
     #[serde(rename = "taskFlow")]
     pub task_flow: TaskFlow,
@@ -94,6 +103,7 @@ impl Job {
         from_reader(job_str.as_bytes()).map_err(|e| format!("Error while parsing job: {:?}", e))
     }
 }
+
 
 impl std::str::FromStr for WorkFlowGraph {
     type Err = Box<dyn std::error::Error>;
