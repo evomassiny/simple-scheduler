@@ -5,9 +5,7 @@ use super::db_writer_actor::DbWriterHandle;
 use super::queue_actor::{QueueSubmissionClient, QueueSubmissionHandle};
 use crate::auth::{AuthToken, Credentials};
 
-use crate::models::{
-    JobId, Status, Task, TaskDepId, TaskDependency, TaskId, User, UserId,
-};
+use crate::models::{JobId, Status, Task, TaskDepId, TaskDependency, TaskId, User, UserId};
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
 use crate::workflows::WorkFlowGraph;

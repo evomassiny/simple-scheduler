@@ -52,7 +52,6 @@ pub struct WorkFlowGraph {
 }
 
 impl WorkFlowGraph {
-    
     /// returns references to the dependencies of `self`
     #[allow(dead_code)]
     pub fn get_task_dependencies<'a>(

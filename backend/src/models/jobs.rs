@@ -77,7 +77,6 @@ impl Job<NewJob> {
 }
 
 impl Job<JobId> {
-
     #[allow(dead_code)]
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(

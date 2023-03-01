@@ -39,7 +39,6 @@ pub struct DbWriterActor {
 }
 
 impl DbWriterActor {
-
     /// Create a job from a `WorkFlowGraph`,
     /// and store it inside the database, (along with all the relates models).
     /// Returns a tuple of 3 elements:

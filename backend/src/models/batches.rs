@@ -102,5 +102,4 @@ impl Batch {
             dependencies,
         })
     }
-
 }

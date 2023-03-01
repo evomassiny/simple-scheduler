@@ -204,15 +204,19 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
     /// It also removes those tasks from any parents `children` list.
     ///
     /// It returns the set of removed tasks, including `task_id`.
-    fn remove_task_and_children_from_queue(&mut self, task_id: TaskId) 
-        -> Result<HashSet<TaskId>, QueueError> {
-        let group: JobId = self.queue.get(&task_id).ok_or_else(
-            || QueueError::UnknownTask(task_id)
-        )?.group;
+    fn remove_task_and_children_from_queue(
+        &mut self,
+        task_id: TaskId,
+    ) -> Result<HashSet<TaskId>, QueueError> {
+        let group: JobId = self
+            .queue
+            .get(&task_id)
+            .ok_or_else(|| QueueError::UnknownTask(task_id))?
+            .group;
 
         let mut removed_tasks: HashSet<TaskId> = HashSet::new();
         let mut to_crawl: Vec<TaskId> = vec![task_id];
-        
+
         // recursively remove tasks, and their children
         // while keeping track of the removed ones.
         while let Some(task_id) = to_crawl.pop() {
@@ -263,7 +267,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
                                 parents.retain(|id| *id != task_id);
                                 if parents.is_empty() {
                                     child_task.state = QueuedState::AwaitingSpawning;
-                                } 
+                                }
                             }
                             _ => continue,
                         }
@@ -277,7 +281,6 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
             }
             // remove task and its children from queue,
             TaskEvent::TaskFailed(task_id) => {
-
                 // remove failed task + children from queue
                 let children = self.remove_task_and_children_from_queue(task_id)?;
                 // Cancel the children tasks
@@ -471,7 +474,6 @@ mod queue_actor_tests {
         let _ = handle.send(task_event).expect("status update failed");
     }
 
-
     #[tokio::test]
     async fn test_filling_queue_with_one_task() {
         // build executor mock-up
@@ -631,7 +633,7 @@ mod queue_actor_tests {
         //     2
         //     |
         //     3
-        //  Asserts that the failure of `2` cancels the 
+        //  Asserts that the failure of `2` cancels the
         //  task `3`.
 
         // build cache mock-up
@@ -713,13 +715,7 @@ mod queue_actor_tests {
             id: 0,
             tasks: vec![1, 2, 3, 4, 5],
             // task 2 and 3 depend of task 1
-            dependencies: vec![
-                (1, 2),
-                (1, 3),
-                (2, 4),
-                (3, 4),
-                (3, 5),
-            ],
+            dependencies: vec![(1, 2), (1, 3), (2, 4), (3, 4), (3, 5)],
         };
         let _ = submission_sender
             .send(submission)
@@ -737,17 +733,17 @@ mod queue_actor_tests {
 
         // simulate failure of the task 2
         mock_task_failure(&task_sender, 2);
-        
+
         // simulate success of the task 3
         mock_task_success(&task_sender, 3);
-        
+
         // assert that task 5 is scheduled
-        sleep(Duration::from_millis(300)).await;  // use sleep() + try_recv() combo
-                                                  // to prevent the test from hanging if it breaks
+        sleep(Duration::from_millis(300)).await; // use sleep() + try_recv() combo
+                                                 // to prevent the test from hanging if it breaks
         assert_eq!(spawn_rx.try_recv(), Ok(5));
 
         // assert that task 2 is NOT scheduled
-        sleep(Duration::from_millis(300)).await;  // use sleep() + try_recv() combo
+        sleep(Duration::from_millis(300)).await; // use sleep() + try_recv() combo
         assert_eq!(spawn_rx.try_recv(), Err(TryRecvError::Empty));
     }
 }

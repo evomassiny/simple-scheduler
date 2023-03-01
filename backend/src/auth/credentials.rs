@@ -1,14 +1,10 @@
 use crate::models::{User, UserId};
 use aes::{
-    cipher::{
-        generic_array::GenericArray, 
-        BlockDecrypt, 
-        BlockEncrypt,
-        KeyInit, 
-    },
+    cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit},
     Aes128, Block,
 };
 
+use base64::engine::{general_purpose::STANDARD as base64_engine, Engine};
 use jaded::{FromJava, Parser};
 use rand::{self, Rng};
 use rsa::{
@@ -18,10 +14,6 @@ use rsa::{
 use serde::{Deserialize, Serialize};
 use serde_json;
 use sqlx::SqliteConnection;
-use base64::engine::{
-    general_purpose::STANDARD as base64_engine,
-    Engine,
-};
 
 use std::io::{Error as IOError, ErrorKind};
 use std::str::FromStr;

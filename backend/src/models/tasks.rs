@@ -231,7 +231,6 @@ impl Task<TaskId> {
             directory: PathBuf::from(&self.handle),
         }
     }
-
 }
 
 /// newly created task dependency, not existing in db yet
@@ -290,7 +289,6 @@ impl TaskDependency<NewTaskDep> {
 }
 
 impl TaskDependency<TaskDepId> {
-
     #[allow(dead_code)]
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result =
@@ -405,7 +403,6 @@ impl TaskCommandArgs<NewArg> {
 }
 
 impl TaskCommandArgs<ArgId> {
-
     #[allow(dead_code)]
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(
@@ -460,4 +457,3 @@ impl TaskCommandArgs<ArgId> {
         Ok(command_args)
     }
 }
-

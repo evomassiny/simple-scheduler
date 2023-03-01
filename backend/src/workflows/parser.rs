@@ -104,7 +104,6 @@ impl Job {
     }
 }
 
-
 impl std::str::FromStr for WorkFlowGraph {
     type Err = Box<dyn std::error::Error>;
 
