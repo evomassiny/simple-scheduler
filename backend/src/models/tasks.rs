@@ -100,22 +100,6 @@ impl Task<TaskId> {
         Ok(())
     }
 
-    pub async fn update_status_and_handle(
-        task_id: TaskId,
-        status: &Status,
-        handle: &str,
-        conn: &mut SqliteConnection,
-    ) -> Result<(), ModelError> {
-        let _ = sqlx::query("UPDATE tasks SET status = ?, handle = ? WHERE id = ?")
-            .bind(&status.as_u8())
-            .bind(handle)
-            .bind(&task_id)
-            .execute(&mut *conn)
-            .await
-            .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
-        Ok(())
-    }
-
     /// Set new status for task identified by 'task_id'
     pub async fn set_status(
         conn: &mut SqliteConnection,
@@ -129,22 +113,6 @@ impl Task<TaskId> {
             .await
             .map_err(|e| ModelError::DbError(format!("{:?}", e)))?;
         Ok(())
-    }
-
-    /// Select a Task by its handle
-    pub async fn get_task_id_by_handle(
-        conn: &mut SqliteConnection,
-        handle: &str,
-    ) -> Result<TaskId, ModelError> {
-        let row = sqlx::query("SELECT id FROM tasks WHERE handle = ?")
-            .bind(&handle)
-            .fetch_one(&mut *conn)
-            .await
-            .map_err(|_| ModelError::ModelNotFound)?;
-        let task_id: TaskId = row
-            .try_get("id")
-            .map_err(|_| ModelError::ColumnError("id".to_string()))?;
-        Ok(task_id)
     }
 
     /// Select an handle by the id of its task
@@ -207,32 +175,6 @@ impl Task<TaskId> {
         Ok(task)
     }
 
-    /// return the list of DISTINCT statuses of all tasks belonging to a single job.
-    pub async fn select_statuses_by_job(
-        job_id: JobId,
-        conn: &mut SqliteConnection,
-    ) -> Result<Vec<Status>, ModelError> {
-        let mut statuses: Vec<Status> = Vec::new();
-        let mut rows = sqlx::query("SELECT distinct(status) FROM tasks WHERE job = ?")
-            .bind(&job_id)
-            .fetch(&mut *conn);
-
-        while let Some(row) = rows
-            .try_next()
-            .await
-            .map_err(|e| ModelError::DbError(e.to_string()))?
-        {
-            let status_code = row
-                .try_get("status")
-                .map_err(|_| ModelError::ColumnError("status".to_string()))?;
-            let status = Status::from_u8(status_code)
-                .map_err(|_| ModelError::ColumnError("status code".to_string()))?;
-
-            statuses.push(status);
-        }
-        Ok(statuses)
-    }
-
     /// query database and return all tasks belonging to `job_id`
     pub async fn select_by_job(
         job_id: JobId,
@@ -283,13 +225,6 @@ impl Task<TaskId> {
         Ok(tasks)
     }
 
-    pub async fn command_args(
-        &self,
-        conn: &mut SqliteConnection,
-    ) -> Result<Vec<TaskCommandArgs<ArgId>>, ModelError> {
-        TaskCommandArgs::select_by_task(self.id, conn).await
-    }
-
     /// Return an handle to the process task represented by self.
     pub fn handle(&self) -> TaskHandle {
         TaskHandle {
@@ -297,18 +232,6 @@ impl Task<TaskId> {
         }
     }
 
-    pub async fn count_by_status(
-        status: &Status,
-        conn: &mut SqliteConnection,
-    ) -> Result<usize, ModelError> {
-        let (count,): (i32,) = sqlx::query_as("SELECT COUNT(*) FROM tasks WHERE status = ?")
-            .bind(status.as_u8())
-            .fetch_one(conn)
-            .await
-            .map_err(|e| ModelError::DbError(e.to_string()))?;
-        // sqlite only support isize
-        Ok(count as usize)
-    }
 }
 
 /// newly created task dependency, not existing in db yet
@@ -367,6 +290,8 @@ impl TaskDependency<NewTaskDep> {
 }
 
 impl TaskDependency<TaskDepId> {
+
+    #[allow(dead_code)]
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result =
             sqlx::query("UPDATE task_dependencies SET child = ?, parent = ?, job = ? WHERE id = ?")
@@ -480,6 +405,8 @@ impl TaskCommandArgs<NewArg> {
 }
 
 impl TaskCommandArgs<ArgId> {
+
+    #[allow(dead_code)]
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(
             "UPDATE task_command_arguments \
@@ -534,53 +461,3 @@ impl TaskCommandArgs<ArgId> {
     }
 }
 
-/// a small subset of a "tasks" record.
-pub struct TaskView {
-    pub id: TaskId,
-    pub status: Status,
-    pub handle: TaskHandle,
-}
-impl TaskView {
-    /// query database and return tasks by status
-    pub async fn select_by_status(
-        status: &Status,
-        conn: &mut SqliteConnection,
-    ) -> Result<Vec<TaskView>, ModelError> {
-        let mut tasks: Vec<TaskView> = Vec::new();
-        let mut rows = sqlx::query(
-            "SELECT id, status, handle FROM tasks WHERE status = ?", // 0 => Pending, 5 => Running
-        )
-        .bind(status.as_u8())
-        .fetch(&mut *conn);
-
-        while let Some(row) = rows
-            .try_next()
-            .await
-            .map_err(|e| ModelError::DbError(e.to_string()))?
-        {
-            let status_code = row
-                .try_get("status")
-                .map_err(|_| ModelError::ColumnError("status".to_string()))?;
-            let status = Status::from_u8(status_code)
-                .map_err(|_| ModelError::ColumnError("status code".to_string()))?;
-
-            let task_id: i64 = row
-                .try_get("id")
-                .map_err(|_| ModelError::ColumnError("id".to_string()))?;
-
-            let handle_string: String = row
-                .try_get("handle")
-                .map_err(|_| ModelError::ColumnError("handle".to_string()))?;
-            let handle_path = PathBuf::from(&handle_string);
-
-            tasks.push(TaskView {
-                id: task_id,
-                handle: TaskHandle {
-                    directory: handle_path,
-                },
-                status,
-            });
-        }
-        Ok(tasks)
-    }
-}

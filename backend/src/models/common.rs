@@ -1,6 +1,5 @@
 #[derive(Debug)]
 pub enum ModelError {
-    InvalidTaskId,
     InvalidTaskName,
     DependencyCycle,
     ModelNotFound,

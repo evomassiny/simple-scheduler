@@ -39,9 +39,6 @@ pub struct DbWriterActor {
 }
 
 impl DbWriterActor {
-    pub fn new(db_pool: SqlitePool) -> Self {
-        Self { db_pool }
-    }
 
     /// Create a job from a `WorkFlowGraph`,
     /// and store it inside the database, (along with all the relates models).

@@ -10,7 +10,7 @@ pub use crate::models::common::ModelError;
 pub use crate::models::jobs::{Job, JobId, NewJob};
 pub use crate::models::status::Status;
 pub use crate::models::tasks::{
-    NewTask, NewTaskDep, Task, TaskCommandArgs, TaskDepId, TaskDependency, TaskId, TaskView,
+    NewTask, NewTaskDep, Task, TaskCommandArgs, TaskDepId, TaskDependency, TaskId,
 };
 pub use crate::models::users::{create_or_update_user, NewUser, User, UserId};
 

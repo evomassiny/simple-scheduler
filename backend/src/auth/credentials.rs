@@ -18,6 +18,10 @@ use rsa::{
 use serde::{Deserialize, Serialize};
 use serde_json;
 use sqlx::SqliteConnection;
+use base64::engine::{
+    general_purpose::STANDARD as base64_engine,
+    Engine,
+};
 
 use std::io::{Error as IOError, ErrorKind};
 use std::str::FromStr;
@@ -39,7 +43,7 @@ impl Credentials {
         encrypted_data: &str,
         private_key: &[u8],
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let blob = base64::decode(encrypted_data)?;
+        let blob = base64_engine.decode(encrypted_data)?;
         let clear_data = EncryptedData::parse(&blob)?.decrypt_data(private_key)?;
 
         // Try to interpret the bytes as json
@@ -132,7 +136,7 @@ impl Credentials {
         blob.extend(encrypted_payload); // The payload
                                         //
                                         // encode the bytes into a string
-        let token = base64::encode(blob);
+        let token = base64_engine.encode(blob);
         Ok(token)
     }
 }
@@ -239,10 +243,6 @@ impl<'a> EncryptedData<'a> {
                 let padding_scheme = PaddingScheme::new_pkcs1v15_encrypt();
                 Ok(rsa_private_key.decrypt(padding_scheme, self.encrypted_aes_key)?)
             }
-            _ => Err(Box::new(IOError::new(
-                ErrorKind::InvalidInput,
-                "Unsupported cipher",
-            ))),
         }
     }
 

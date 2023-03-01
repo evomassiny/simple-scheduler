@@ -139,6 +139,7 @@ impl TaskHandle {
     }
 
     /// attempt to read the task PID from `self.pid_file()`
+    #[allow(dead_code)]
     pub async fn get_pid(&self) -> Result<Pid, Box<dyn std::error::Error>> {
         let mut content = String::new();
         let path = self.pid_file();
@@ -179,6 +180,7 @@ impl TaskHandle {
     }
 
     /// ask the task to terminate
+    #[allow(dead_code)]
     pub async fn terminate(&self) -> Result<(), Box<dyn std::error::Error>> {
         if !self.is_monitor_running().await {
             return Err("task is not running".into());
@@ -190,6 +192,7 @@ impl TaskHandle {
     }
 
     /// check presence of status file
+    #[allow(dead_code)]
     pub async fn has_status_file(&self) -> bool {
         if let Ok(_md) = metadata(self.status_file()).await {
             return true;
@@ -198,6 +201,7 @@ impl TaskHandle {
     }
 
     /// return the status of the task
+    #[allow(dead_code)]
     pub async fn get_status_from_file(&self) -> Result<TaskStatus, Box<dyn std::error::Error>> {
         // check if status file exists
         let _ = metadata(self.status_file()).await?;
@@ -205,6 +209,7 @@ impl TaskHandle {
     }
 
     /// Configure a running monitor process to use a new socket to reach the scheduler.
+    #[allow(dead_code)]
     pub async fn configure_hypervisor_socket(
         &self,
         socket: PathBuf,
@@ -228,6 +233,7 @@ impl TaskHandle {
     }
 
     /// Ask the monitor process to contact the hypervisor to communicate its status.
+    #[allow(dead_code)]
     pub async fn request_status_notification(&self) -> Result<(), Box<dyn std::error::Error>> {
         if !self.is_monitor_running().await {
             return Err(format!(

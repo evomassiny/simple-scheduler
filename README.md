@@ -21,6 +21,8 @@ The app also keeps track of the status of each job, and is able to retreive thei
 sudo apt install libsqlite3-dev sqlite3
 # rustup
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# install `musl` to statically link release build
+rustup target add x86_64-unknown-linux-musl
 ```
 
 1. clone the repo
@@ -32,10 +34,7 @@ git clone https://github.com/evomassiny/simple-scheduler.git
 
 2. create empty database
 ```
-cargo install sqlx-cli
-cd simple-scheduler/backend
-sqlx database create --database-url sqlite:database.sqlite
-sqlx migrate run --database-url sqlite:database.sqlite
+sqlite3 ./database.sqlite < migrations/20210402155322_creation.sql
 ```
 
 3. create a temporary job directory (for temporary artifacts)

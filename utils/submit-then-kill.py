@@ -38,6 +38,7 @@ with open(zip_file, "rb") as zip_fd:
         "http://127.0.0.1:8000/rest/scheduler/submit/",
         files={"file": (os.path.basename(zip_file), zip_fd, "application/zip")},
     )
+    print(response.text)
     data = response.json()
     pprint(data)
     print()

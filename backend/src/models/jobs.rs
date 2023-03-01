@@ -48,7 +48,7 @@ impl Job<NewJob> {
         Job {
             id: NewJob,
             name: name.to_string(),
-            submit_time: NaiveDateTime::from_timestamp(Utc::now().timestamp(), 0),
+            submit_time: Utc::now().naive_utc(),
             status: Status::Pending,
             user,
         }
@@ -77,6 +77,8 @@ impl Job<NewJob> {
 }
 
 impl Job<JobId> {
+
+    #[allow(dead_code)]
     pub async fn save(&mut self, conn: &mut SqliteConnection) -> Result<(), ModelError> {
         let _query_result = sqlx::query(
             "UPDATE jobs SET name = ?, submit_time = ?, status = ?, user = ? WHERE id = ?",

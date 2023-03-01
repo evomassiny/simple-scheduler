@@ -103,17 +103,4 @@ impl Batch {
         })
     }
 
-    pub async fn from_job(
-        job: Job<JobId>,
-        conn: &mut SqliteConnection,
-    ) -> Result<Self, ModelError> {
-        // select tasks by job id
-        let tasks = Task::select_by_job(job.id, conn).await?;
-        let dependencies = TaskDependency::select_by_job(job.id, conn).await?;
-        Ok(Self {
-            job,
-            tasks,
-            dependencies,
-        })
-    }
 }

@@ -312,7 +312,7 @@ pub fn spawn_queue_actor<K, S>(
         loop {
             tokio::select! {
                // this asserts that futures are polled in order, eg
-               // it introduce a priority task event > orders > claim request
+               // it introduces a priority task event > orders
                biased;
                Some(event) = events.recv() => {
                     match queue_actor.handle_event(event) {

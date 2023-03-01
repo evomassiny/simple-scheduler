@@ -345,7 +345,7 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
                         let mut task = entry.get_mut();
                         task.status = Status::Canceled;
                         if let Some(job_id) = task.job {
-                            self.update_job_status(job_id);
+                            let _ = self.update_job_status(job_id)?;
                         }
                     }
                 }

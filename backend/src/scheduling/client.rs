@@ -6,7 +6,7 @@ use super::queue_actor::{QueueSubmissionClient, QueueSubmissionHandle};
 use crate::auth::{AuthToken, Credentials};
 
 use crate::models::{
-    JobId, ModelError, Status, Task, TaskDepId, TaskDependency, TaskId, User, UserId,
+    JobId, Status, Task, TaskDepId, TaskDependency, TaskId, User, UserId,
 };
 use crate::rocket::futures::TryStreamExt;
 use crate::sqlx::Row;
@@ -28,13 +28,11 @@ pub struct TaskOutput {
 
 #[derive(Debug)]
 pub enum SchedulerClientError {
-    KillFailed(String),
     JobCreationError,
     DbError(String),
     UnknownTask,
     UnknownJob,
     UnknownUser,
-    RequestSendingError,
     BadInputFile,
 }
 impl std::fmt::Display for SchedulerClientError {
