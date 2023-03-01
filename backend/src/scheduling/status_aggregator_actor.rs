@@ -38,6 +38,7 @@ pub struct StatusEntry {
 }
 
 /// Status Cache of Tasks
+/// (LRU cache)
 pub struct TaskStatusCache {
     pub version_age_by_task: HashMap<TaskId, StatusEntry>,
     /// represent the "date" of a status
@@ -80,10 +81,8 @@ impl TaskStatusCache {
 
     /// remove old entries and entries that won't change (eg: status of terminated tasks)
     fn garbage_collect(&mut self) {
-        if self.version_age_by_task.len() >= self.capacity {
-            while self.version_age_by_task.len() >= self.capacity {
-                self.drop_oldest_entry();
-            }
+        while self.version_age_by_task.len() >= self.capacity {
+            self.drop_oldest_entry();
         }
     }
 
@@ -100,7 +99,7 @@ impl TaskStatusCache {
         dates.sort_by_key(|&(date, _id)| date);
 
         if let Some((_date, task_id)) = dates.first() {
-            self.version_age_by_task.remove(task_id);
+            self.drop_entry(*task_id);
         }
     }
 
@@ -132,6 +131,11 @@ impl TaskStatusCache {
     }
 }
 
+/// reads a process monitor message:
+/// * if its a status update, update the status cache,
+///   warns the `job_cache` actor, if the task status changed.
+/// * if its a termination notice, drop the cached status associated with the task
+///   and warn the `job_cache` actor.
 pub async fn process_monitor_message(
     stream: &mut UnixStream,
     version_cache: &mut TaskStatusCache,
