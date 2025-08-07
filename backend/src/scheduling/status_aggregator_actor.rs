@@ -67,7 +67,7 @@ impl TaskStatusCache {
                 changed = true;
             }
             Entry::Occupied(mut entry) => {
-                let mut status_date: &mut StatusEntry = entry.get_mut();
+                let status_date: &mut StatusEntry = entry.get_mut();
                 if version > status_date.version {
                     changed = status != status_date.status;
                     status_date.status = status;

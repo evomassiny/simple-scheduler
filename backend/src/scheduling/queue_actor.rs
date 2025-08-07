@@ -298,7 +298,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
             // it was marked as 'AwaitingMurder'
             // in this case kill it.
             TaskEvent::TaskStarted(task_id) => {
-                let mut task = self
+                let task = self
                     .queue
                     .get_mut(&task_id)
                     .ok_or(QueueError::UnknownTask(task_id))?;
@@ -310,7 +310,7 @@ impl<K: ExecutorHandle, S: CacheWriteHandle> QueueActor<K, S> {
                     // kill task then remove it
                     QueuedState::AwaitingMurder => {
                         self.executor_handle.kill(task_id);
-                        drop(task);
+                        let _ = task;
                         let _ = self.queue.remove(&task_id);
                     }
                     // cannot reason about it.

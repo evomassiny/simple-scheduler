@@ -354,7 +354,7 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
                 // sync db state
                 self.db_writer_handle
                     .set_job_status(job_id, Status::Canceled);
-                let mut job = self
+                let job = self
                     .jobs
                     .get_mut(&job_id)
                     .ok_or(CacheError::UnknownJob(job_id))?;

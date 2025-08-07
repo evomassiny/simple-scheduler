@@ -1,6 +1,6 @@
 [package]
 name = "simple-scheduler"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Yves MOISAN <yves@moisan.tf"]
 edition = "2021"
 
@@ -28,7 +28,4 @@ scrypt = "0.10"
 clap = { version = "3", features =  ["derive"] }
 rand = "*"
 
-# [dependencies.uuid]
-# version = "1.3.0"
-# features = [ "v7", ]
-
+time =  ">=0.3.35"
