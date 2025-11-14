@@ -155,7 +155,7 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
                 maybe_job = None;
             }
             Entry::Occupied(mut entry) => {
-                let mut task = entry.get_mut();
+                let task = entry.get_mut();
 
                 maybe_job = task.job;
                 task.status = update.status;
@@ -253,7 +253,7 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
             // `CacheResponse::UnknownJob` otherwise.
             CacheReadRequest::GetJob { id, from } => {
                 match self.jobs.get_mut(&id) {
-                    Some(mut job) => {
+                    Some(job) => {
                         job.last_access = self.access_counter;
                         let mut task_statuses: Vec<(TaskId, Status)> =
                             Vec::with_capacity(job.tasks.len());
@@ -342,7 +342,7 @@ impl<T: QueuedTaskHandle> CacheActor<T> {
                         });
                     }
                     Entry::Occupied(mut entry) => {
-                        let mut task = entry.get_mut();
+                        let task = entry.get_mut();
                         task.status = Status::Canceled;
                         if let Some(job_id) = task.job {
                             let _ = self.update_job_status(job_id)?;

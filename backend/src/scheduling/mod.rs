@@ -3,14 +3,14 @@
 //! each actor being a loop inside of a tokio task.
 //!
 //! The scheduling "server" is made of 5 actors:
-//! * the `Executor` actor, which kills or spawn Jobs upon request from the `Queue` actor
+//! * the `Executor` actor, which kills or spawns Jobs upon request from the `Queue` actor
 //! * the `Queue` actor, it keeps tracks of which task must be spawned, and in which order.
 //!   It listens for:
 //!    * (running) task status updates from the "Status Cache" actor
 //!    * scheduling orders (scheduling a new job, or kill another) from the scheduler client,
 //!   Using those channels, it keeps un up-to-date queue of pending tasks, and ask the executor
 //!   to spawn a new one everytime a computing slot becomes idle.
-//! * the `status aggregator` actor: this one listen for status notification from the monitor
+//! * the `status aggregator` actor: this one listens for status notifications from the monitor
 //!   processes (the processes that monitor the runners),
 //!   Everytime a status changes, it forward the message to the status cache,
 //! * the `status cache actor`: this actor keeps a cached version of jobs and tasks statuses,
