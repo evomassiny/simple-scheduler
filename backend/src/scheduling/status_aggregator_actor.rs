@@ -9,6 +9,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use rocket::tokio::{
     self,
@@ -16,7 +17,7 @@ use rocket::tokio::{
 };
 
 type Version = usize;
-type AccessDate = usize;
+type AccessDate = SystemTime;
 
 /// A status notication,
 /// that we send to the CacheActor
@@ -32,7 +33,7 @@ pub struct StatusEntry {
     /// monitor process (using it allows us to handle unordered messages).
     version: Version,
     /// update age, maintained by the version cache,
-    date: AccessDate,
+    date: SystemTime,
     /// last recorded task status
     status: TaskStatus,
 }
@@ -41,8 +42,6 @@ pub struct StatusEntry {
 /// (LRU cache)
 pub struct TaskStatusCache {
     pub version_age_by_task: HashMap<TaskId, StatusEntry>,
-    /// represent the "date" of a status
-    time_stamp: AccessDate,
     /// cache size,
     /// oldest entries are dropped,
     /// if the capicity is reached.
@@ -53,7 +52,7 @@ impl TaskStatusCache {
     /// Cache a msg status, return either or not
     /// the task status changed since the last message.
     pub fn status_changed(&mut self, task: TaskId, version: Version, status: TaskStatus) -> bool {
-        let now: AccessDate = self.current_date();
+        let now: SystemTime = SystemTime::now();
         let mut changed: bool = false;
         match self.version_age_by_task.entry(task) {
             Entry::Vacant(entry) => {
@@ -91,7 +90,7 @@ impl TaskStatusCache {
     }
 
     fn drop_oldest_entry(&mut self) {
-        let mut dates: Vec<(AccessDate, TaskId)> = self
+        let mut dates: Vec<(SystemTime, TaskId)> = self
             .version_age_by_task
             .values()
             .map(|status_date| (status_date.date, status_date.task_id))
@@ -103,32 +102,6 @@ impl TaskStatusCache {
         }
     }
 
-    /// increment the time_stamp
-    /// handle overflows by reseting all status' dates
-    /// (while keeping the date order)
-    fn current_date(&mut self) -> AccessDate {
-        match self.time_stamp {
-            AccessDate::MAX => {
-                let mut dates: Vec<(AccessDate, TaskId)> = self
-                    .version_age_by_task
-                    .values()
-                    .map(|status_date| (status_date.date, status_date.task_id))
-                    .collect();
-                dates.sort_by_key(|&(date, _id)| date);
-                for (index, (_date, task_id)) in dates.iter().enumerate() {
-                    self.version_age_by_task
-                        .get_mut(task_id)
-                        .unwrap() // safe because key and values.id are garantied to be consisitent
-                        .date = index;
-                }
-                self.time_stamp = dates.len();
-            }
-            _ => {
-                self.time_stamp += 1;
-            }
-        }
-        self.time_stamp
-    }
 }
 
 /// reads a process monitor message:
@@ -152,6 +125,7 @@ pub async fn process_monitor_message(
             // close connection with monitor process
             let _ = ExecutorQuery::Ok.async_send_to(&mut *stream).await;
             let _ = stream.shutdown().await;
+            println!("{task_id}, {status:?}");
 
             // send new version to job status cache
             if version_cache.status_changed(task_id, update_version, status) {
@@ -193,12 +167,13 @@ pub fn spawn_task_status_aggregator_actor(
     tokio::task::spawn(async move {
         let mut version_cache = TaskStatusCache {
             version_age_by_task: HashMap::new(),
-            time_stamp: 0,
+            //time_stamp: 0,
             capacity: 2048, // arbitrary
         };
 
         loop {
-            // also listen for messages, either from the web app or from a monitor process.
+            // listen for messages,
+            // either from the web app or from a monitor process.
             match listener.accept().await {
                 Ok((mut stream, _addr)) => {
                     if let Err(e) = process_monitor_message(
