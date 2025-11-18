@@ -10,6 +10,7 @@ use crate::tasks::handle::TaskHandle;
 use crate::tasks::ipc::Barrier;
 use crate::tasks::monitor::Monitor;
 //use crate::tasks::task_status::TaskStatus;
+use crate::config::HEARTBEART_PERIOD_IN_SECONDS;
 use crate::messaging::TaskStatus;
 use crate::tasks::utils::{
     assign_file_to_fd, block_sigchild, close_everything_but, rename_current_process,
@@ -123,7 +124,7 @@ impl TaskHandle {
                                         update_message_count: 0,
                                         handle,
                                         hypervisor_socket: hypervisor_sock,
-                                        update_period_in_sec: 5,
+                                        update_period_in_sec: HEARTBEART_PERIOD_IN_SECONDS,
                                     };
 
                                     if let Err(e) = monitor.run() {

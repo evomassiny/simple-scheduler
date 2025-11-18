@@ -1,3 +1,19 @@
+//!
+//! This actor collects all status updates coming from
+//! tasks monitors, such as PENDING, RUNNING, FAILED, ...
+//!
+//! Its sole purpose is to cache those status in memory,
+//! and forward the status message to the rest of the app
+//! only when the status of a task __changes__.
+//!
+//! This way we reduce the among of messages that needs to be processed
+//! by the rest of the app by a big factor.
+//!
+//! The actor is also responsible for flaging tasks which are not sending
+//! status update as lost (eg FAILED). This occurs in the unlikely
+//! situation where a monitor process crashes or is OOM-killed.
+//!
+use crate::config::GRACE_PERIOD_IN_SECONDS;
 use crate::messaging::AsyncSendable;
 use crate::messaging::ExecutorQuery;
 use crate::messaging::MonitorMsg;
@@ -9,11 +25,12 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use rocket::tokio::{
     self,
     net::{UnixListener, UnixStream},
+    time::interval,
 };
 
 type Version = usize;
@@ -41,14 +58,24 @@ pub struct StatusEntry {
 /// Status Cache of Tasks
 /// (LRU cache)
 pub struct TaskStatusCache {
-    pub version_age_by_task: HashMap<TaskId, StatusEntry>,
-    /// cache size,
+    version_age_by_task: HashMap<TaskId, StatusEntry>,
+    /// task from which we don't get an update since
+    /// this period are considered lost
+    grace_period: Duration,
     /// oldest entries are dropped,
-    /// if the capicity is reached.
-    pub capacity: usize,
+    /// if the capacity is reached.
+    capacity: usize,
 }
 
 impl TaskStatusCache {
+    pub fn new() -> Self {
+        Self {
+            version_age_by_task: HashMap::new(),
+            grace_period: Duration::from_secs(GRACE_PERIOD_IN_SECONDS),
+            capacity: 2048, // arbitrary
+        }
+    }
+
     /// Cache a msg status, return either or not
     /// the task status changed since the last message.
     pub fn status_changed(&mut self, task: TaskId, version: Version, status: TaskStatus) -> bool {
@@ -74,34 +101,52 @@ impl TaskStatusCache {
                 }
             }
         }
-        self.garbage_collect();
         changed
     }
 
-    /// remove old entries and entries that won't change (eg: status of terminated tasks)
-    fn garbage_collect(&mut self) {
-        while self.version_age_by_task.len() >= self.capacity {
-            self.drop_oldest_entry();
+    /// Collect old entries and entries that won't change
+    fn list_done_tasks(&mut self) -> Vec<TaskId> {
+        self.version_age_by_task
+            .values()
+            .filter(|entry| entry.status.is_terminated())
+            .map(|entry| entry.task_id)
+            .collect::<Vec<TaskId>>()
+    }
+
+    // collect the IDs of all tasks where the last
+    // update message is older that the "grace period"
+    fn list_lost_tasks(&self) -> Vec<TaskId> {
+        let mut losts: Vec<TaskId> = Vec::new();
+        let now = SystemTime::now();
+        for entry in self.version_age_by_task.values() {
+            // terminated task do not send updates
+            if entry.status.is_terminated() {
+                continue;
+            }
+            let lost = match now.duration_since(entry.date) {
+                Ok(duration) => duration > self.grace_period,
+                Err(e) => {
+                    // unlikely case when the system clock
+                    // acts weirdly. If this happens, mark the
+                    // task as lost.
+                    true
+                }
+            };
+            if lost {
+                losts.push(entry.task_id);
+            }
         }
+        losts
     }
 
     fn drop_entry(&mut self, task: TaskId) {
         let _ = self.version_age_by_task.remove(&task);
     }
 
-    fn drop_oldest_entry(&mut self) {
-        let mut dates: Vec<(SystemTime, TaskId)> = self
-            .version_age_by_task
-            .values()
-            .map(|status_date| (status_date.date, status_date.task_id))
-            .collect();
-        dates.sort_by_key(|&(date, _id)| date);
-
-        if let Some((_date, task_id)) = dates.first() {
-            self.drop_entry(*task_id);
-        }
+    /// Shrink internal hashmap to its capacity
+    fn shrink_to_capacity(&mut self) {
+        self.version_age_by_task.shrink_to(self.capacity);
     }
-
 }
 
 /// reads a process monitor message:
@@ -152,6 +197,35 @@ pub async fn process_monitor_message(
     Ok(())
 }
 
+/// Identify lost tasks and mark them as 'Failed' (warns the job_cache about it)
+/// Also drop entries that won't change their status.
+pub async fn collect_garbage(
+    version_cache: &mut TaskStatusCache,
+    job_cache_handle: UnboundedSender<StatusUpdate>,
+) -> Result<(), Box<dyn Error>> {
+    // drop lost tasks and warn job_cache
+    let lost_tasks = version_cache.list_lost_tasks();
+    for task_id in lost_tasks {
+        job_cache_handle.send(StatusUpdate {
+            task_id,
+            status: Status::Failed,
+        })?;
+        version_cache.drop_entry(task_id);
+    }
+    // drop terminated tasks
+    let done_tasks = version_cache.list_done_tasks();
+    for task_id in done_tasks {
+        job_cache_handle.send(StatusUpdate {
+            task_id,
+            status: Status::Failed,
+        })?;
+        version_cache.drop_entry(task_id);
+    }
+    // avoid infinite growth of the cache.
+    version_cache.shrink_to_capacity();
+    Ok(())
+}
+
 /// Spawn an actor that:
 /// * listens on any incoming connection from monitor processes,
 /// * manages an up-to-date cache of Task statuses,
@@ -165,32 +239,44 @@ pub fn spawn_task_status_aggregator_actor(
     let listener = UnixListener::bind(&hypervisor_socket).expect("Cant bind to hypervisor socket.");
 
     tokio::task::spawn(async move {
-        let mut version_cache = TaskStatusCache {
-            version_age_by_task: HashMap::new(),
-            //time_stamp: 0,
-            capacity: 2048, // arbitrary
-        };
-
+        let mut version_cache = TaskStatusCache::new();
+        let mut gc_interval = interval(Duration::from_secs(GRACE_PERIOD_IN_SECONDS));
         loop {
-            // listen for messages,
-            // either from the web app or from a monitor process.
-            match listener.accept().await {
-                Ok((mut stream, _addr)) => {
-                    if let Err(e) = process_monitor_message(
-                        &mut stream,
-                        &mut version_cache,
-                        job_cache_handle.clone(),
-                    )
-                    .await
-                    {
-                        eprintln!("Error while processing update msg: {:?}", e);
+            tokio::select! {
+                // listen for messages from monitor processes
+                // (cancelation safe according to tokio's doc)
+                acceptation = listener.accept()  => {
+                    match acceptation {
+                        Ok((mut stream, _addr)) => {
+                            if let Err(e) = process_monitor_message(
+                                &mut stream,
+                                &mut version_cache,
+                                job_cache_handle.clone(),
+                            )
+                            .await
+                            {
+                                eprintln!("Error while processing update msg: {:?}", e);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "Connection to hypervisor socket '{:?}' failed: {:?}",
+                                &hypervisor_socket, e,
+                            );
+                        }
                     }
                 }
-                Err(e) => {
-                    eprintln!(
-                        "Connection to hypervisor socket '{:?}' failed: {:?}",
-                        &hypervisor_socket, e,
-                    );
+                // Run garbage collection every `GRACE_PERIOD_IN_SECONDS` seconds,
+                // In this we detect lost task, and drop terminates tasks
+                // from the cache.
+                _ = gc_interval.tick()  => {
+                    let result = collect_garbage(
+                        &mut version_cache,
+                        job_cache_handle.clone(),
+                    ).await;
+                    if let Err(e) = result {
+                        eprintln!("Task garbage collection failed: {:?}", e);
+                    }
                 }
             }
         }

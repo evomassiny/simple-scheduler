@@ -3,6 +3,15 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::{ConnectOptions, SqliteConnection};
 use std::str::FromStr;
 
+/// Task monitor must sends an hearthbeat every X second
+/// with their status.
+pub const HEARTBEART_PERIOD_IN_SECONDS: usize = 5;
+
+/// Task monitors that don't relay status updates after X seconds
+/// are considered dead.
+pub const GRACE_PERIOD_IN_SECONDS: u64 = 60;
+
+/// User customizable settings
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub database_url: String,

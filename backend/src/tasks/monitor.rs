@@ -1,3 +1,16 @@
+//!
+//! This code defines "Monitor" processes,
+//! we spawn one of them for each task,
+//! it has 2 purposes:
+//!  * monitor the task (is it dead, is it running ?) and forward
+//!  the status to the hypervisor/scheduler.
+//!  * listen for "start" or "kill" from the scheduler to manage the tasks.
+//!
+//! Internaly, it runs server that listen on:
+//! * child terminations kernel signals
+//! * hypervisor orders coming from a UnixSocket.
+//! The "server" part is a single threaded event loop (epoll-based).
+//!
 use crate::messaging::{ExecutorQuery, MonitorMsg, Sendable, TaskStatus};
 use crate::models::TaskId;
 use crate::tasks::handle::TaskHandle;
