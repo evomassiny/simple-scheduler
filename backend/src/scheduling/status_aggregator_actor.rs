@@ -170,7 +170,6 @@ pub async fn process_monitor_message(
             // close connection with monitor process
             let _ = ExecutorQuery::Ok.async_send_to(&mut *stream).await;
             let _ = stream.shutdown().await;
-            println!("{task_id}, {status:?}");
 
             // send new version to job status cache
             if version_cache.status_changed(task_id, update_version, status) {
