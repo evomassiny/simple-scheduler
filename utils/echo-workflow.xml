@@ -30,7 +30,7 @@
         <staticCommand value="bash">
           <arguments>
             <argument value="-c"/>
-            <argument value="sleep 5;  echo B"/>
+            <argument value="sleep 60;  echo B"/>
           </arguments>
         </staticCommand>
       </nativeExecutable>
