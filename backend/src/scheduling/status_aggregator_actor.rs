@@ -98,6 +98,7 @@ impl TaskStatusCache {
                     changed = status != status_date.status;
                     status_date.status = status;
                     status_date.version = version;
+                    status_date.date = now;
                 }
             }
         }
@@ -171,6 +172,7 @@ pub async fn process_monitor_message(
             let _ = ExecutorQuery::Ok.async_send_to(&mut *stream).await;
             let _ = stream.shutdown().await;
 
+            //println!("status aggregator: received {task_id} is {status:?}");
             // send new version to job status cache
             if version_cache.status_changed(task_id, update_version, status) {
                 let status: Status = match status {
@@ -205,6 +207,7 @@ pub async fn collect_garbage(
     // drop lost tasks and warn job_cache
     let lost_tasks = version_cache.list_lost_tasks();
     for task_id in lost_tasks {
+        println!("status aggregator: {task_id} is lost, we consider it as failed");
         job_cache_handle.send(StatusUpdate {
             task_id,
             status: Status::Failed,
@@ -214,10 +217,6 @@ pub async fn collect_garbage(
     // drop terminated tasks
     let done_tasks = version_cache.list_done_tasks();
     for task_id in done_tasks {
-        job_cache_handle.send(StatusUpdate {
-            task_id,
-            status: Status::Failed,
-        })?;
         version_cache.drop_entry(task_id);
     }
     // avoid infinite growth of the cache.
